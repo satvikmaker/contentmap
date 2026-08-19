@@ -2,7 +2,14 @@ export { defineCollection, defineConfig, defineParser } from './config/define.ts
 export { ConfigError, findConfig, resolveConfig } from './config/resolve.ts'
 export { Builder, createBuilder } from './builder.ts'
 export { run } from './cli/run.ts'
-export { DiagnosticBag } from './diagnostics.ts'
+export {
+  codeFrame,
+  DiagnosticBag,
+  findKeyPosition,
+  normalizeParserError,
+  renderDiagnostics
+} from './diagnostics/index.ts'
+export type { Position, RenderOptions } from './diagnostics/index.ts'
 export {
   builtinParsers,
   frontmatterOnlyParser,
@@ -21,6 +28,7 @@ export { mapLimit } from './utils/limit.ts'
 export { cacheKey, digest, stableStringify } from './utils/digest.ts'
 
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
+export type { HasUnserializable, InvalidType, NotSerializable } from './types.ts'
 export type { Loader, Query } from './runtime/index.ts'
 export type {
   BuilderEvent,

@@ -18,6 +18,8 @@ export interface Diagnostic {
   field?: string
   /** Actionable next step or did-you-mean. */
   hint?: string
+  /** Rendered source excerpt with a caret. Human output only; never in --json. */
+  frame?: string
   collection?: string
   documentId?: string
 }
@@ -73,6 +75,52 @@ export interface CollectionDefinition<TSchema extends StandardSchemaV1 = Standar
 
 /** A document as a `sort` comparator sees it: schema output plus `_meta`. */
 export type AnyDocument = Record<string, unknown> & { _meta: DocumentMeta }
+
+/**
+ * Compile-time rejection carrying a human-readable sentence.
+ *
+ * Embedding the explanation in the type means `tsc` prints actual guidance and
+ * a docs link, instead of a structural mismatch the reader has to decode. The
+ * technique is content-collections'; it is the one piece of their type layer
+ * worth copying wholesale.
+ */
+export declare const invalid: unique symbol
+export interface InvalidType<Message extends string, T> {
+  readonly [invalid]: Message
+  readonly received: T
+}
+
+export type NotSerializable =
+  'Documents are written to disk as JavaScript, so every field must be serializable. Functions and symbols cannot be emitted. See https://contentmap.dev/docs/serialization'
+
+/**
+ * True when `T` contains a function or symbol anywhere.
+ *
+ * Deliberately shallow in what it special-cases: Date/RegExp/URL/Map/Set all
+ * round-trip through our serializer, so only the genuinely unemittable types
+ * are rejected. Recursion is bounded by `Depth` to keep tsc cheap.
+ */
+export type HasUnserializable<T, Depth extends readonly unknown[] = []> = Depth['length'] extends 6
+  ? false
+  : T extends (...args: never[]) => unknown
+    ? true
+    : T extends symbol
+      ? true
+      : T extends Date | RegExp | URL | string | number | boolean | bigint | null | undefined
+        ? false
+        : T extends readonly (infer U)[]
+          ? HasUnserializable<U, [...Depth, 0]>
+          : T extends Map<infer K, infer V>
+            ? HasUnserializable<K | V, [...Depth, 0]>
+            : T extends Set<infer U>
+              ? HasUnserializable<U, [...Depth, 0]>
+              : T extends object
+                ? true extends {
+                    [K in keyof T]-?: HasUnserializable<T[K], [...Depth, 0]>
+                  }[keyof T]
+                  ? true
+                  : false
+                : false
 
 export type EmitFormat = 'modules' | 'bundle' | 'both'
 
@@ -137,7 +185,10 @@ export interface StoreEntry {
 
 export interface BuildResult {
   collections: number
+  /** Documents emitted. */
   documents: number
+  /** Documents considered, including those dropped by errors. */
+  scanned: number
   errors: number
   warnings: number
   durationMs: number

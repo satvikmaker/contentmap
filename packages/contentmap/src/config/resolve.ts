@@ -14,9 +14,12 @@ import { loadModule } from './load.ts'
 export class ConfigError extends Error {
   override readonly name = 'ConfigError'
   readonly hint: string | undefined
-  constructor(message: string, hint?: string) {
+  /** Config file this concerns, when known. Never guessed from a stack trace. */
+  readonly file: string | undefined
+  constructor(message: string, hint?: string, file?: string) {
     super(message)
     this.hint = hint
+    this.file = file
   }
 }
 
@@ -65,14 +68,16 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
 
   if (!user || typeof user !== 'object') {
     throw new ConfigError(
-      `${configPath} has no default export`,
-      'Export your config as default: `export default defineConfig({ ... })`'
+      'Config has no default export',
+      'Export your config as default: `export default defineConfig({ ... })`',
+      configPath
     )
   }
   if (!user.collections || typeof user.collections !== 'object') {
     throw new ConfigError(
-      `${configPath} does not define any collections`,
-      'Add a `collections` object: `defineConfig({ collections: { posts } })`'
+      'Config does not define any collections',
+      'Add a `collections` object: `defineConfig({ collections: { posts } })`',
+      configPath
     )
   }
 
@@ -160,7 +165,10 @@ function validateCollections(
     if (!def.include) {
       throw new ConfigError(`Collection "${name}" is missing \`include\``)
     }
-    if (!def.schema || typeof def.schema !== 'object' || !('~standard' in def.schema)) {
+    // arktype's Type is CALLABLE, so a `typeof === "object"` check rejects a
+    // perfectly valid Standard Schema implementation. Test for the interface,
+    // not for a representation.
+    if (!isStandardSchema(def.schema)) {
       throw new ConfigError(
         `Collection "${name}" has no Standard Schema in \`schema\``,
         'Pass a zod, valibot, arktype or effect schema — anything implementing Standard Schema.'
@@ -201,6 +209,16 @@ function validateCollections(
     throw new ConfigError('No collections defined', 'Add at least one collection.')
   }
   return out
+}
+
+/**
+ * A Standard Schema is anything carrying a `~standard` property with a
+ * `validate` function — object or function, since vendors differ.
+ */
+function isStandardSchema(value: unknown): boolean {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return false
+  const standard = (value as { '~standard'?: { validate?: unknown } })['~standard']
+  return typeof standard?.validate === 'function'
 }
 
 /**

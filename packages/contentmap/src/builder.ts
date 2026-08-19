@@ -1,5 +1,10 @@
 import { extname } from 'node:path'
-import { DiagnosticBag } from './diagnostics.ts'
+import {
+  codeFrame,
+  DiagnosticBag,
+  findKeyPosition,
+  normalizeParserError
+} from './diagnostics/index.ts'
 import { resolveConfig } from './config/resolve.ts'
 import { collectFiles, metaFor, type PreviousState, type SourceFile } from './collect/read.ts'
 import { resolveParser } from './parsers/index.ts'
@@ -47,6 +52,7 @@ export class Builder {
   #previous = new Map<string, Map<string, PreviousState>>()
   #cache = new Map<string, StoreEntry[]>()
   #emitStats: EmitStats | undefined
+  #scanned = 0
 
   constructor(options: BuilderOptions = {}) {
     this.#options = options
@@ -88,6 +94,7 @@ export class Builder {
   async build(): Promise<BuildResult> {
     const started = performance.now()
     for (const k of Object.keys(this.phases)) delete this.phases[k]
+    this.#scanned = 0
     this.#emit({ type: 'build:start' })
 
     const config = this.#config ?? (await this.resolve())
@@ -119,6 +126,7 @@ export class Builder {
     const result: BuildResult = {
       collections: Object.keys(config.collections).length,
       documents,
+      scanned: Math.max(this.#scanned, documents),
       errors: diagnostics.errors,
       warnings: diagnostics.warnings,
       durationMs: performance.now() - started,
@@ -162,6 +170,7 @@ export class Builder {
 
     const cached = this.#cache.get(collection.name) ?? []
     const cacheHits = collected.unchanged.length
+    this.#scanned += cached.filter(e => collected.unchanged.includes(e.meta.filePath)).length
 
     const parsedGroups = await this.#time('parse+validate', () =>
       mapLimit(collected.files, config.concurrency, async file =>
@@ -260,6 +269,7 @@ export class Builder {
       config.parsers
     )
     if (!parser) {
+      this.#scanned += 1
       diagnostics.add({
         code: 'CM_PARSE',
         severity: 'error',
@@ -275,17 +285,26 @@ export class Builder {
     try {
       parsed = await parser.parse({ content: file.content, path: file.absolutePath })
     } catch (error) {
+      // js-yaml (vendored by confbox) appends its own multi-line ASCII frame to
+      // `.message`. Left alone it lands inside our tree with foreign
+      // indentation and makes --json messages multi-line.
+      this.#scanned += 1
+      const { message, position } = normalizeParserError(error)
       diagnostics.add({
         code: 'CM_PARSE',
         severity: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message,
         file: file.relativePath,
-        collection: collection.name
+        collection: collection.name,
+        ...(position ? { line: position.line, ...(position.column === undefined ? {} : { column: position.column }) } : {}),
+        ...(position ? { frame: codeFrame(file.content, position) } : {}),
+        hint: `Parsed with the "${parser.name}" parser.`
       })
       return []
     }
 
     const records = Array.isArray(parsed) ? parsed : [parsed]
+    this.#scanned += records.length
     const meta = metaFor(file, collection.directory)
     const out: StoreEntry[] = []
 
@@ -308,6 +327,9 @@ export class Builder {
         if (policy !== 'ignore') {
           const known = Object.keys(raw)
           for (const issue of result.issues) {
+            // A validator reports the field path but knows nothing about the
+            // file, so locate the key ourselves to get a caret on the line.
+            const at = issue.path ? findKeyPosition(file.content, issue.path) : undefined
             diagnostics.add({
               code: 'CM_VALIDATION',
               // fail => error (build stops). warn/skip => warning (build
@@ -316,6 +338,8 @@ export class Builder {
               message: issue.message,
               file: file.relativePath,
               ...(issue.path === undefined ? {} : { field: issue.path }),
+              ...(at ? { line: at.line, ...(at.column === undefined ? {} : { column: at.column }) } : {}),
+              ...(at ? { frame: codeFrame(file.content, at) } : {}),
               collection: collection.name,
               documentId: id,
               ...hintFor(issue.path, known)
@@ -329,6 +353,7 @@ export class Builder {
       } else {
         this.#reportUnknownFields(raw, result.value, injectedBody, {
           file: file.relativePath,
+          source: file.content,
           collection: collection.name,
           documentId: id,
           policy: config.onUnknownField,
@@ -353,6 +378,7 @@ export class Builder {
 
 interface UnknownFieldContext {
   file: string
+  source: string
   collection: string
   documentId: string
   policy: Severity
@@ -381,12 +407,15 @@ function reportUnknownFields(
   for (const key of Object.keys(raw)) {
     if (key === injectedBody) continue
     if (key in validated) continue
+    const at = findKeyPosition(ctx.source, key)
     ctx.diagnostics.add({
       code: 'CM_UNKNOWN_FIELD',
       severity: ctx.policy === 'fail' ? 'error' : 'warning',
       message: `"${key}" is not in the schema and was discarded`,
       file: ctx.file,
       field: key,
+      ...(at ? { line: at.line, ...(at.column === undefined ? {} : { column: at.column }) } : {}),
+      ...(at ? { frame: codeFrame(ctx.source, at) } : {}),
       collection: ctx.collection,
       documentId: ctx.documentId,
       ...hintForUnknown(key, declared)

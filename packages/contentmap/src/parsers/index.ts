@@ -8,8 +8,8 @@ export const frontmatterParser: Parser = {
   extensions: ['.md', '.mdx', '.markdown'],
   hasBody: true,
   parse({ content }) {
-    const { raw, format, body } = splitFrontmatter(content)
-    const data = raw === null ? {} : parseFrontmatterBlock(raw, format)
+    const { raw, format, body, offset } = splitFrontmatter(content)
+    const data = raw === null ? {} : parseFrontmatterBlock(raw, format, offset)
     return { data, body: body.trim() }
   }
 }
@@ -20,8 +20,8 @@ export const frontmatterOnlyParser: Parser = {
   extensions: [],
   hasBody: false,
   parse({ content }) {
-    const { raw, format } = splitFrontmatter(content)
-    return { data: raw === null ? {} : parseFrontmatterBlock(raw, format) }
+    const { raw, format, offset } = splitFrontmatter(content)
+    return { data: raw === null ? {} : parseFrontmatterBlock(raw, format, offset) }
   }
 }
 
