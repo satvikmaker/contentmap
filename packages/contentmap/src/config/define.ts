@@ -24,11 +24,14 @@ export function defineConfig<const T extends UserConfig>(config: T): T {
  * we cannot write to disk, so the failure surfaces at the definition site with
  * a readable sentence rather than as a serializer crash mid-build.
  */
-export function defineCollection<TSchema extends StandardSchemaV1>(
-  collection: CollectionDefinition<TSchema>
-): HasUnserializable<InferSchema<TSchema>> extends true
-  ? InvalidType<NotSerializable, InferSchema<TSchema>>
-  : CollectionDefinition<TSchema> {
+export function defineCollection<
+  TSchema extends StandardSchemaV1,
+  TOut = InferSchema<TSchema>
+>(
+  collection: CollectionDefinition<TSchema, TOut>
+): HasUnserializable<TOut> extends true
+  ? InvalidType<NotSerializable, TOut>
+  : CollectionDefinition<TSchema, TOut> {
   return collection as never
 }
 

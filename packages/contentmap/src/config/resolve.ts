@@ -111,6 +111,7 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     collections,
     output,
     parsers: user.parsers ?? [],
+    renderer: user.renderer,
     concurrency: options.concurrency ?? user.concurrency ?? availableParallelism(),
     readConcurrency: user.readConcurrency ?? 64,
     onValidationError: options.onValidationError ?? user.onValidationError ?? 'fail',

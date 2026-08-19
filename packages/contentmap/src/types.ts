@@ -1,5 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
+type InferOutput<T extends StandardSchemaV1> = StandardSchemaV1.InferOutput<T>
+
 export type Promisable<T> = T | Promise<T>
 
 /** How a class of problem affects the build. */
@@ -42,6 +44,107 @@ export interface ParsedFile {
   body?: string
 }
 
+export interface RenderInput {
+  /** Document body, frontmatter already stripped. */
+  body: string
+  /** Absolute path, for renderers that resolve relative references. */
+  path: string
+  meta: DocumentMeta
+}
+
+export interface Heading {
+  depth: number
+  text: string
+  id: string
+}
+
+/**
+ * A markdown renderer.
+ *
+ * Core ships none. The measured spread between engines is 0.57ms and 58.8ms for
+ * the same document, so hard-wiring one is the mistake velite made — it inlines
+ * the whole unified graph at build time, leaving users unable to dedupe or
+ * patch remark, and security scanners with nothing to see.
+ *
+ * `toPlain` and `headings` are optional: core derives both from the rendered
+ * HTML when a renderer does not provide them, so a minimal renderer is a single
+ * function.
+ */
+export interface Renderer {
+  name: string
+  toHtml(input: RenderInput, options?: unknown): Promisable<string>
+  toPlain?(input: RenderInput): Promisable<string>
+  headings?(input: RenderInput): Promisable<readonly Heading[]>
+}
+
+export interface TocEntry {
+  depth: number
+  text: string
+  id: string
+  children: TocEntry[]
+}
+
+export interface ReadingTime {
+  minutes: number
+  words: number
+  characters: number
+}
+
+export interface ExcerptOptions {
+  /** Maximum characters. Default 260. */
+  length?: number
+  /** Explicit cut marker in the source. Default `<!--more-->`. */
+  separator?: string | false
+}
+
+export interface TocOptions {
+  /** Shallowest heading level included. Default 2. */
+  minDepth?: number
+  /** Deepest heading level included. Default 3. */
+  maxDepth?: number
+}
+
+export interface ReadingTimeOptions {
+  /** Words per minute. Default 265, the constant Gatsby popularised. */
+  wpm?: number
+}
+
+/** Signals that a document should be dropped without being an error. */
+export const SKIP: unique symbol = Symbol.for('contentmap.skip')
+export interface SkipSignal {
+  readonly [SKIP]: true
+  readonly reason: string | undefined
+}
+
+/**
+ * What a `transform` receives alongside the validated document.
+ *
+ * Derived values live here rather than in the schema because the schema belongs
+ * to the user's validator. Velite put them in the schema and had to fork Zod to
+ * do it — 5,754 lines and three years of unfixable type-leak bugs.
+ */
+export interface TransformContext {
+  meta: DocumentMeta
+  /** Raw body, frontmatter stripped. */
+  body: string
+  /** Rendered HTML, via the configured renderer. Memoised per document. */
+  markdown(options?: unknown): Promise<string>
+  /** Body as plain text, markup removed. Memoised. */
+  plain(): Promise<string>
+  excerpt(options?: ExcerptOptions): Promise<string>
+  toc(options?: TocOptions): Promise<TocEntry[]>
+  readingTime(options?: ReadingTimeOptions): Promise<ReadingTime>
+  /** Drop this document. Reported, not an error. */
+  skip(reason?: string): never
+  logger: Logger
+}
+
+export interface Logger {
+  info(message: string): void
+  warn(message: string): void
+  debug(message: string): void
+}
+
 export interface Parser {
   name: string
   extensions: readonly string[]
@@ -49,7 +152,10 @@ export interface Parser {
   parse(input: { content: string; path: string }): Promisable<ParsedFile | ParsedFile[]>
 }
 
-export interface CollectionDefinition<TSchema extends StandardSchemaV1 = StandardSchemaV1> {
+export interface CollectionDefinition<
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TOut = unknown
+> {
   name: string
   directory: string
   include: string | readonly string[]
@@ -62,6 +168,11 @@ export interface CollectionDefinition<TSchema extends StandardSchemaV1 = Standar
   index?: readonly string[]
   /** Fields never carried in the index. Defaults to content/html/mdx/body/raw. */
   heavy?: readonly string[]
+  /**
+   * Derive fields the schema cannot: rendered HTML, reading time, excerpts.
+   * The return value becomes the document type.
+   */
+  transform?: (doc: InferOutput<TSchema>, ctx: TransformContext) => TOut | Promise<TOut>
   /**
    * Applied after the default id sort, before emission.
    *
@@ -139,6 +250,8 @@ export interface UserConfig {
   root?: string
   output?: OutputOptions
   parsers?: readonly Parser[]
+  /** Markdown renderer. Without one, `ctx.markdown()` is a build error. */
+  renderer?: Renderer
   concurrency?: number
   /** Parallel file reads. Defaults to 64, the measured optimum. */
   readConcurrency?: number
@@ -167,6 +280,7 @@ export interface ResolvedConfig {
   collections: Record<string, CollectionDefinition>
   output: ResolvedOutput
   parsers: readonly Parser[]
+  renderer: Renderer | undefined
   concurrency: number
   readConcurrency: number
   onValidationError: Severity
@@ -214,3 +328,4 @@ export type BuilderEvent =
   | { type: 'diagnostic'; diagnostic: Diagnostic }
   | { type: 'config:loaded'; path: string }
   | { type: 'watch:change'; path: string }
+  | { type: 'log'; level: 'info' | 'warn' | 'debug'; message: string }

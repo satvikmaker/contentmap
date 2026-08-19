@@ -1,5 +1,5 @@
 import type { Diagnostic } from '../types.ts'
-import { bold, cyan, dim, gray, red, yellow } from '../utils/ansi.ts'
+import { blue, bold, cyan, dim, gray, red, yellow } from '../utils/ansi.ts'
 import type { DiagnosticBag } from './bag.ts'
 
 export interface RenderOptions {
@@ -19,11 +19,14 @@ const TITLES: Record<string, string> = {
   CM_MISSING_REF: 'Missing reference',
   CM_CONFIG: 'Configuration',
   CM_NO_MATCH: 'No matching files',
-  CM_SERIALIZE: 'Not serializable'
+  CM_SERIALIZE: 'Not serializable',
+  CM_TRANSFORM: 'Transform',
+  CM_SKIPPED: 'Skipped'
 }
 
 const TICK_ERROR = '\u2716'
 const TICK_WARN = '\u26a0'
+const TICK_INFO = '\u2139'
 const BRANCH = '\u251c\u2500'
 const LAST = '\u2514\u2500'
 const PIPE = '\u2502'
@@ -49,20 +52,32 @@ export function renderDiagnostics(bag: DiagnosticBag, options: RenderOptions): s
   const affected = new Set(items.filter(d => d.file ?? d.documentId).map(d => d.file ?? d.documentId)).size
   const ok = Math.max(0, options.total - affected)
 
+  // An `info`-only report is not a warning. Announcing "0 errors, 0 warnings"
+  // under a warning glyph tells the reader something went wrong when nothing
+  // did — a skipped draft is the system working as configured.
+  const icon = errors > 0 ? red(TICK_ERROR) : warnings > 0 ? yellow(TICK_WARN) : blue(TICK_INFO)
+  const counts =
+    errors > 0 || warnings > 0
+      ? count(errors, 'error') + ', ' + count(warnings, 'warning')
+      : count(items.length, 'note')
+
   const lines: string[] = [
-    (errors > 0 ? red(TICK_ERROR) : yellow(TICK_WARN)) +
-      ' contentmap ' + dim('\u2014') + ' ' +
-      count(errors, 'error') + ', ' + count(warnings, 'warning') + ' ' +
+    icon +
+      ' contentmap ' + dim('\u2014') + ' ' + counts + ' ' +
       'in ' + plural(options.total, 'document') + ' ' +
       dim('(' + ok.toLocaleString() + ' ok)'),
     ''
   ]
 
   for (const [code, group] of groupBy(items, d => d.code)) {
-    const worst = group.some(d => d.severity === 'error') ? 'error' : 'warning'
+    const worst = group.some(d => d.severity === 'error')
+      ? 'error'
+      : group.some(d => d.severity === 'warning')
+        ? 'warning'
+        : 'info'
     const label = TITLES[code] ?? code
-    const tag = worst === 'error' ? String(group.length) : group.length + ', warn'
-    lines.push('  ' + bold(label) + ' ' + dim('(' + tag + ')'))
+    const suffix = worst === 'error' ? '' : worst === 'warning' ? ', warn' : ', info'
+    lines.push('  ' + bold(label) + ' ' + dim('(' + group.length + suffix + ')'))
 
     const files = [...groupBy(group, d => d.file ?? d.documentId ?? '(unknown)')]
     const shown = files.slice(0, limit)

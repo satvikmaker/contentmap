@@ -13,10 +13,16 @@ export type InferSchema<T> = T extends StandardSchemaV1<unknown, infer Out> ? Ou
 
 type Collections<C> = C extends UserConfig ? C['collections'] : never
 
-/** The full document type for collection `K`, including `_meta`. */
+/**
+ * The full document type for collection `K`, including `_meta`.
+ *
+ * A collection with a `transform` is typed by what the transform returns, not
+ * by the schema: derived fields such as rendered HTML and reading time exist
+ * only after it runs.
+ */
 export type InferDoc<C, K extends keyof Collections<C> & string> =
-  Collections<C>[K] extends CollectionDefinition<infer S>
-    ? InferSchema<S> extends infer Data
+  Collections<C>[K] extends CollectionDefinition<infer S, infer Out>
+    ? (unknown extends Out ? InferSchema<S> : Out) extends infer Data
       ? Data extends Record<string, unknown>
         ? Data & { _meta: DocumentMeta }
         : never

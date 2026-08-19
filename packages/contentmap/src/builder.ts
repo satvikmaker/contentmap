@@ -9,6 +9,7 @@ import { resolveConfig } from './config/resolve.ts'
 import { collectFiles, metaFor, type PreviousState, type SourceFile } from './collect/read.ts'
 import { resolveParser } from './parsers/index.ts'
 import { validate } from './validate/standard.ts'
+import { createTransformContext, isSkipSignal } from './render/index.ts'
 import {
   cleanOutput,
   createEmitStats,
@@ -28,6 +29,8 @@ import type {
   BuildResult,
   CollectionDefinition,
   Diagnostic,
+  DocumentMeta,
+  Logger,
   ResolvedConfig,
   Severity,
   StoreEntry
@@ -53,6 +56,11 @@ export class Builder {
   #cache = new Map<string, StoreEntry[]>()
   #emitStats: EmitStats | undefined
   #scanned = 0
+  #logger: Logger = {
+    info: message => this.#emit({ type: 'log', level: 'info', message }),
+    warn: message => this.#emit({ type: 'log', level: 'warn', message }),
+    debug: message => this.#emit({ type: 'log', level: 'debug', message })
+  }
 
   constructor(options: BuilderOptions = {}) {
     this.#options = options
@@ -257,6 +265,70 @@ export class Builder {
     reportUnknownFields(raw, validated, injectedBody, ctx)
   }
 
+  /**
+   * Run a collection's transform.
+   *
+   * Returns undefined when the document should be dropped — either the
+   * transform called `skip()`, or it threw. A transform that throws is a
+   * diagnostic naming the file, never an unhandled rejection: velite lets a
+   * bad date escape as a bare `RangeError: Invalid time value` with no
+   * filename at all.
+   */
+  async #runTransform(
+    collection: CollectionDefinition,
+    validated: Record<string, unknown>,
+    documentMeta: DocumentMeta,
+    file: { relativePath: string; absolutePath: string; content: string },
+    diagnostics: DiagnosticBag
+  ): Promise<Record<string, unknown> | undefined> {
+    const ctx = createTransformContext({
+      meta: documentMeta,
+      body: (validated[BODY_FIELD] as string | undefined) ?? '',
+      path: file.absolutePath,
+      renderer: this.#config?.renderer,
+      logger: this.#logger
+    })
+
+    try {
+      const produced = await collection.transform!(validated, ctx)
+      if (produced === null || typeof produced !== 'object' || Array.isArray(produced)) {
+        diagnostics.add({
+          code: 'CM_TRANSFORM',
+          severity: 'error',
+          message: `transform must return an object, got ${describeValue(produced)}`,
+          file: file.relativePath,
+          collection: collection.name,
+          documentId: documentMeta.id
+        })
+        return undefined
+      }
+      return produced as Record<string, unknown>
+    } catch (error) {
+      if (isSkipSignal(error)) {
+        diagnostics.add({
+          code: 'CM_SKIPPED',
+          severity: 'info',
+          message: error.reason ?? 'skipped by transform',
+          file: file.relativePath,
+          collection: collection.name,
+          documentId: documentMeta.id
+        })
+        return undefined
+      }
+      const err = error as Error & { hint?: string }
+      diagnostics.add({
+        code: 'CM_TRANSFORM',
+        severity: 'error',
+        message: err?.message ?? String(error),
+        file: file.relativePath,
+        collection: collection.name,
+        documentId: documentMeta.id,
+        ...(err?.hint === undefined ? {} : { hint: err.hint })
+      })
+      return undefined
+    }
+  }
+
   async #processFile(
     file: SourceFile,
     collection: CollectionDefinition,
@@ -361,14 +433,30 @@ export class Builder {
         })
       }
 
+      const documentMeta = many ? { ...meta, id } : meta
+      const validated = result.ok ? result.value : raw
+
+      let data: Record<string, unknown> = validated
+      if (collection.transform) {
+        const transformed = await this.#runTransform(
+          collection,
+          validated,
+          documentMeta,
+          file,
+          diagnostics
+        )
+        if (transformed === undefined) continue
+        data = transformed
+      }
+
       // The body already lives in `data` (under the parser's body field), so
       // keeping a second copy on the entry doubled resident memory for no gain.
       out.push({
         id,
         collection: collection.name,
         digest: file.digest,
-        data: result.ok ? result.value : raw,
-        meta: many ? { ...meta, id } : meta,
+        data,
+        meta: documentMeta,
         mtimeMs: file.mtimeMs
       })
     }
@@ -426,6 +514,12 @@ function reportUnknownFields(
 function hintForUnknown(key: string, declared: readonly string[]): { hint?: string } {
   const guess = suggest(key, declared)
   return guess ? { hint: `Did you mean "${guess}"?` } : {}
+}
+
+function describeValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'an array'
+  return typeof value
 }
 
 function hintFor(field: string | undefined, known: readonly string[]): { hint?: string } {

@@ -27,10 +27,33 @@ export { serialize, SerializeError } from './write/serialize.ts'
 export { mapLimit } from './utils/limit.ts'
 export { cacheKey, digest, stableStringify } from './utils/digest.ts'
 
+export {
+  buildToc,
+  createTransformContext,
+  excerptOf,
+  htmlToHeadings,
+  htmlToPlain,
+  MissingRendererError,
+  readingTimeOf,
+  slugify
+} from './render/index.ts'
+export { SKIP } from './types.ts'
+
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
 export type { HasUnserializable, InvalidType, NotSerializable } from './types.ts'
 export type { Loader, Query } from './runtime/index.ts'
 export type {
+  ExcerptOptions,
+  Heading,
+  Logger,
+  ReadingTime,
+  ReadingTimeOptions,
+  RenderInput,
+  Renderer,
+  SkipSignal,
+  TocEntry,
+  TocOptions,
+  TransformContext,
   BuilderEvent,
   BuilderOptions,
   BuildResult,
