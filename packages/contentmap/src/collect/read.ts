@@ -48,11 +48,25 @@ export interface PreviousState {
  * consumer can subscribe, which is how an fd-limited build lost 2,758 of 3,000
  * files and still exited 0.
  */
+export interface CollectOptions {
+  previous?: ReadonlyMap<string, PreviousState>
+  /**
+   * Paths the watcher reported as changed, relative to the collection.
+   *
+   * When present, the watcher is authoritative: a file it did not mention has
+   * not changed, so its mtime is not worth a syscall. That removes the whole
+   * stat pass from an incremental rebuild — around 27ms of a 10,000-file
+   * corpus — leaving only the glob and the reads that actually matter.
+   */
+  changed?: ReadonlySet<string>
+}
+
 export async function collectFiles(
   collection: CollectionDefinition,
   config: ResolvedConfig,
-  previous?: ReadonlyMap<string, PreviousState>
+  options: CollectOptions = {}
 ): Promise<CollectResult> {
+  const { previous, changed } = options
   // Config resolution guarantees these for file-based collections; a
   // loader-based one never reaches here.
   const directory = collection.directory
@@ -91,10 +105,24 @@ export async function collectFiles(
     const absolutePath = join(directory, relative)
     const relativePath = toPosix(relative)
     try {
-      const info = await stat(absolutePath)
       const prior = previous?.get(relativePath)
+      // The watcher observed this file move, so it is authoritative for it.
+      const named = changed?.has(relativePath) ?? false
+
+      // Anything the watcher did not name has not changed, so its mtime is not
+      // worth a syscall.
+      if (changed && prior && !named) {
+        return { kind: 'unchanged' as const, relativePath }
+      }
+
+      const info = await stat(absolutePath)
       // Cheap prefilter: 27.5ms for 10k files, versus ~516ms to read them.
-      if (prior && prior.mtimeMs === info.mtimeMs) {
+      //
+      // Skipped for a file the watcher named. mtime has millisecond resolution,
+      // and two saves inside the same millisecond are perfectly ordinary while
+      // editing — trusting mtime over the watcher there silently drops the
+      // edit, and the rebuild never happens.
+      if (!named && prior && prior.mtimeMs === info.mtimeMs) {
         return { kind: 'unchanged' as const, relativePath }
       }
       const content = await withFdRetry(() => readFile(absolutePath, 'utf8'))

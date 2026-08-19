@@ -38,6 +38,10 @@ export interface LoaderContext {
   signal: AbortSignal
   /** No network is permitted; satisfy the request from cache or fail. */
   frozen: boolean
+  /** An explicit refresh: ignore any revalidate window and refetch. */
+  forced: boolean
+  /** Payload from `refreshContent()`, for webhook-driven partial updates. */
+  refreshContext?: Record<string, unknown>
   digest(input: string | Uint8Array): string
   /**
    * Read the previous successful snapshot, if any.

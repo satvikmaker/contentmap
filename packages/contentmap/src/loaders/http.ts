@@ -64,7 +64,7 @@ export function http<T = unknown>(options: HttpLoaderOptions<T>): Loader {
         )
       }
 
-      if (typeof revalidate === 'object' && cached) {
+      if (typeof revalidate === 'object' && cached && !ctx.forced) {
         const fetchedAt = Number(ctx.meta.get('fetchedAt') ?? 0)
         const age = (Date.now() - fetchedAt) / 1000
         if (Number.isFinite(age) && age < revalidate.seconds) {

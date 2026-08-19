@@ -3,6 +3,8 @@ export { defineLoader, http, RemoteFetchError, RemoteStore } from './loaders/ind
 export { findSecret, redactSecrets, screenForSecrets, SecretLeakError } from './security/secrets.ts'
 export { ConfigError, findConfig, resolveConfig } from './config/resolve.ts'
 export { Builder, createBuilder } from './builder.ts'
+export { startWatch } from './watch/index.ts'
+export type { WatchHandle, WatchHooks, WatchOptions } from './watch/index.ts'
 export { run } from './cli/run.ts'
 export {
   codeFrame,
@@ -66,6 +68,8 @@ export type {
   Revalidate
 } from './loaders/index.ts'
 export type {
+  BuildOptions,
+  RefreshOptions,
   Asset,
   Image,
   ImageMeasurement,

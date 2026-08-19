@@ -486,6 +486,22 @@ export interface BuilderOptions {
   dryRun?: boolean
 }
 
+export interface BuildOptions {
+  /** Paths the watcher saw change, relative to each collection. */
+  changed?: ReadonlySet<string>
+  /** Collections to refetch regardless of their revalidate window. */
+  forceLoaders?: ReadonlySet<string>
+  /** Payload forwarded to loaders as `refreshContext`. */
+  refreshContext?: Record<string, unknown>
+}
+
+export interface RefreshOptions {
+  /** Limit the refresh to these collections. Default: all. */
+  loaders?: readonly string[]
+  /** Reaches the loader as `refreshContext`. */
+  context?: Record<string, unknown>
+}
+
 export type BuilderEvent =
   | { type: 'build:start' }
   | { type: 'build:end'; result: BuildResult }

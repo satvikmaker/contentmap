@@ -37,7 +37,9 @@ export const fixtureTest = test.extend<{ fixture: Fixture }>({
         return path
       }
     })
-    await rm(raw, { recursive: true, force: true })
+    // maxRetries: the OS can still be releasing handles from a watcher that
+    // has only just closed.
+    await rm(raw, { recursive: true, force: true, maxRetries: 5 })
   }
 })
 

@@ -50,6 +50,7 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
         format: { type: 'string' },
         'on-validation-error': { type: 'string' },
         frozen: { type: 'boolean' },
+        debounce: { type: 'string' },
         json: { type: 'boolean' },
         silent: { type: 'boolean', short: 's' },
         verbose: { type: 'boolean', short: 'v' },
@@ -93,14 +94,8 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
         return await build({ ...options, dryRun: true }, values, true)
       case 'clean':
         return await clean(options)
-      case 'dev': {
-        // Honest placeholder: watch mode is M7. Build once so the command is
-        // not simply a dead end, and say plainly what is missing.
-        process.stderr.write(
-          `${yellow('!')} watch mode arrives in M7 — building once instead.\n`
-        )
-        return await build(options, values)
-      }
+      case 'dev':
+        return await dev(options, values)
       case 'init':
         process.stderr.write(`${yellow('!')} \`init\` arrives in M9.\n`)
         return 1
@@ -263,6 +258,56 @@ function toJson(result: BuildResult, checkOnly: boolean): unknown {
       ...(d.documentId === undefined ? {} : { documentId: d.documentId })
     }))
   }
+}
+
+async function dev(options: BuilderOptions, values: Values): Promise<number> {
+  const builder = createBuilder(options)
+  const silent = values['silent'] === true
+
+  builder.on(event => {
+    if (silent) return
+    if (event.type === 'log' && event.level !== 'debug') {
+      process.stderr.write(`${dim(event.message)}\n`)
+    }
+    if (event.type === 'watch:change') {
+      process.stderr.write(`${dim(`changed ${event.path}`)}\n`)
+    }
+  })
+
+  const report = (result: Awaited<ReturnType<typeof builder.build>>): void => {
+    if (result.diagnostics.length > 0) {
+      const bag = new DiagnosticBag()
+      for (const d of result.diagnostics) bag.add(d)
+      process.stderr.write(`${renderDiagnostics(bag, { total: result.scanned })}\n`)
+    }
+    if (silent) return
+    const ms = Math.round(result.durationMs)
+    const mark = result.errors > 0 ? red('✖') : green('✔')
+    process.stderr.write(
+      `${mark} ${result.documents} document${result.documents === 1 ? '' : 's'} ${dim(`(${ms}ms)`)}\n`
+    )
+  }
+
+  report(await builder.build())
+  const handle = await builder.watch()
+  if (!silent) {
+    process.stderr.write(`${cyan('watching')} ${dim(`${handle.paths.length} path(s)`)}\n`)
+  }
+
+  builder.on(event => {
+    if (event.type === 'build:end') report(event.result)
+  })
+
+  // Run until interrupted. A non-zero exit here would be wrong: the first
+  // build failing is a normal part of editing.
+  await new Promise<void>(resolve => {
+    const stop = () => {
+      void builder.close().then(resolve)
+    }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+  })
+  return 0
 }
 
 async function clean(options: BuilderOptions): Promise<number> {

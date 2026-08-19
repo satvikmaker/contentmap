@@ -1,0 +1,285 @@
+import { describe, expect, it, vi } from 'vitest'
+import { readFile, rm, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { createBuilder } from '../src/builder.ts'
+import { fixtureTest } from './helpers.ts'
+
+const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
+
+const CONFIG = `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string() })
+})
+export default defineConfig({ collections: { posts } })
+`
+
+/**
+ * Watcher events come from the OS, so these tests use real time: never fake
+ * timers, never a bare sleep.
+ *
+ * The window is generous because filesystem-event latency scales with machine
+ * load, and this file runs alongside ten others. That is not the same as
+ * retrying — each assertion must still become true exactly once, and a genuinely
+ * missed rebuild still fails. Measured in isolation, every case settles in well
+ * under a second.
+ */
+const WINDOW = 30_000
+
+const until = async (fn: () => Promise<void> | void): Promise<void> =>
+  vi.waitFor(fn, { timeout: WINDOW, interval: 25 })
+
+describe('watch mode', { timeout: 60_000 }, () => {
+  fixtureTest('rebuilds when a file changes', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: First\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    await builder.watch({ debounce: 20 })
+    try {
+      await fixture.write('content/a.md', '---\ntitle: Second\n---\nx')
+      await until(async () => {
+        const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+        expect(doc).toContain('Second')
+      })
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('picks up an added file and drops a deleted one', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    await builder.watch({ debounce: 20 })
+    try {
+      await fixture.write('content/b.md', '---\ntitle: B\n---\nx')
+      await until(async () => {
+          const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+          expect(index).toContain('"b"')
+      })
+
+      await rm(join(fixture.dir, 'content/a.md'))
+      await until(async () => {
+          const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+          expect(index).not.toContain('"a"')
+      })
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('coalesces a burst of writes into very few builds', async ({ fixture }) => {
+    // content-collections has no debounce, queue or mutex: ten rapid writes
+    // there produced ten concurrent builds all writing the same files.
+    await fixture.write('contentmap.config.ts', CONFIG)
+    for (let i = 0; i < 20; i++) {
+      await fixture.write(`content/p${i}.md`, `---\ntitle: P${i}\n---\nx`)
+    }
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+
+    let builds = 0
+    let inflight = 0
+    let peak = 0
+    builder.on(e => {
+      if (e.type === 'build:start') {
+        builds++
+        peak = Math.max(peak, ++inflight)
+      }
+      if (e.type === 'build:end') inflight--
+    })
+    // Subscribing replays the buffered history, so the initial build is already
+    // counted. Measure from here.
+    const baseline = builds
+
+    await builder.watch({ debounce: 30 })
+    try {
+      for (let i = 0; i < 20; i++) {
+        await writeFile(
+          join(fixture.dir, `content/p${i}.md`),
+          `---\ntitle: Edited ${i}\n---\nx`
+        )
+      }
+      await until(async () => {
+          const doc = await readFile(join(fixture.dir, '.contentmap/posts/p19.js'), 'utf8')
+          expect(doc).toContain('Edited 19')
+      })
+
+      expect(peak, 'builds must never overlap').toBe(1)
+      const rebuilds = builds - baseline
+      expect(rebuilds, `20 writes produced ${rebuilds} rebuilds`).toBeLessThanOrEqual(3)
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('never rebuilds in response to its own output', async ({ fixture }) => {
+    // Watching the output directory is an infinite loop: build writes, watcher
+    // fires, build writes.
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+
+    let builds = 0
+    builder.on(e => {
+      if (e.type === 'build:start') builds++
+    })
+    await builder.watch({ debounce: 20 })
+    try {
+      await fixture.write('content/a.md', '---\ntitle: B\n---\nx')
+      await until(async () => {
+          const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+          expect(doc).toContain('"B"')
+      })
+      // A write can produce more than one filesystem event, so an extra
+      // rebuild is not itself a fault — the output is byte-identical and the
+      // writer skips it. What must never happen is a loop: the build writing
+      // into a directory it also watches. Settle, then require two consecutive
+      // quiet windows.
+      let quiet = 0
+      let last = builds
+      for (let i = 0; i < 20 && quiet < 2; i++) {
+        await new Promise(r => setTimeout(r, 250))
+        if (builds === last) quiet++
+        else {
+          quiet = 0
+          last = builds
+        }
+      }
+      expect(quiet, `build count never settled (still ${builds})`).toBe(2)
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('keeps the last good output when the config breaks', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const good = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+
+    const warnings: string[] = []
+    builder.on(e => {
+      if (e.type === 'log' && e.level === 'warn') warnings.push(e.message)
+    })
+
+    await builder.watch({ debounce: 20 })
+    try {
+      // A config saved mid-edit is usually a syntax error the next keystroke fixes.
+      await writeFile(join(fixture.dir, 'contentmap.config.ts'), 'export default defineConfig({\n')
+      await until(() => expect(warnings.some(w => w.includes('config reload failed'))).toBe(true))
+      expect(await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')).toBe(good)
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('closing releases the watcher', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const handle = await builder.watch({ debounce: 20 })
+    expect(handle.paths.length).toBeGreaterThan(0)
+
+    // Subscribe BEFORE closing: a late subscriber is replayed the buffered
+    // history, which would count the initial build.
+    let builds = 0
+    builder.on(e => {
+      if (e.type === 'build:start') builds++
+    })
+    await builder.close()
+    const atClose = builds
+
+    await fixture.write('content/a.md', '---\ntitle: After close\n---\nx')
+    await new Promise(r => setTimeout(r, 300))
+    // A leaked watcher is the usual cause of a hanging test run.
+    expect(builds).toBe(atClose)
+  })
+})
+
+describe('refreshContent', { timeout: 60_000 }, () => {
+  fixtureTest('refetches a remote collection on demand', async ({ fixture }) => {
+    const first = JSON.stringify({ items: [{ slug: 'a', title: 'One' }] })
+    const second = JSON.stringify({ items: [{ slug: 'a', title: 'Two' }] })
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+let n = 0
+const news = defineCollection({
+  name: 'news',
+  loader: http({
+    url: 'https://x.invalid/n',
+    select: p => p.items,
+    id: r => r.slug,
+    // A window this long would normally prevent any refetch.
+    revalidate: { seconds: 3600 },
+    fetch: async () => { n++; return new Response(n === 1 ? ${JSON.stringify(first)} : ${JSON.stringify(second)}, { status: 200 }) }
+  }),
+  schema: z.object({ slug: z.string(), title: z.string() })
+})
+export default defineConfig({ collections: { news } })
+`
+    )
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/news/a.js'), 'utf8')).toContain('One')
+
+    // A plain rebuild stays inside the revalidate window.
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/news/a.js'), 'utf8')).toContain('One')
+
+    // An explicit refresh ignores it — this is what a CMS webhook calls.
+    const refreshed = await builder.refreshContent({ loaders: ['news'] })
+    expect(refreshed.errors).toBe(0)
+    expect(await readFile(join(fixture.dir, '.contentmap/news/a.js'), 'utf8')).toContain('Two')
+  })
+
+  fixtureTest('forwards its payload to the loader', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, defineLoader } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const probe = defineCollection({
+  name: 'probe',
+  loader: defineLoader({
+    name: 'probe',
+    load: (ctx) => ({
+      records: [{
+        id: 'x',
+        data: { seen: JSON.stringify(ctx.refreshContext ?? null), forced: String(ctx.forced) },
+        digest: JSON.stringify(ctx.refreshContext ?? null) + String(ctx.forced)
+      }],
+      fromCache: false
+    })
+  }),
+  schema: z.object({ seen: z.string(), forced: z.string() })
+})
+export default defineConfig({ collections: { probe } })
+`
+    )
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/probe/x.js'), 'utf8')).toContain(
+      'forced: "false"'
+    )
+
+    await builder.refreshContent({ loaders: ['probe'], context: { entryId: 42 } })
+    const doc = await readFile(join(fixture.dir, '.contentmap/probe/x.js'), 'utf8')
+    expect(doc).toContain('forced: "true"')
+    expect(doc).toContain('entryId')
+  })
+})

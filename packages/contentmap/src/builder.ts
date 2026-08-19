@@ -33,7 +33,8 @@ import { TransformCache } from './cache/index.ts'
 import { RemoteStore } from './loaders/meta.ts'
 import type { LoadedRecord, LoaderContext } from './loaders/types.ts'
 import { redactSecrets } from './security/secrets.ts'
-import { suggest } from './utils/paths.ts'
+import { suggest, toPosix } from './utils/paths.ts'
+import { startWatch, type WatchHandle, type WatchOptions } from './watch/index.ts'
 /** Field the frontmatter parsers write the document body into. */
 const BODY_FIELD = 'content'
 
@@ -76,6 +77,8 @@ export class UnknownCollectionError extends Error {
 
 import type { ContextServices } from './render/context.ts'
 import type {
+  BuildOptions,
+  RefreshOptions,
   AnyDocument,
   CollectionRef,
   BuilderEvent,
@@ -125,6 +128,12 @@ export class Builder {
   #remote!: RemoteStore
   /** Records the loader produced this build, so siblings() can use them. */
   #loaded = new Map<string, LoadedRecord[]>()
+  /** Paths the watcher reported this build; undefined means "discover". */
+  #changedPaths: ReadonlySet<string> | undefined
+  /** Collections to refetch regardless of their revalidate window. */
+  #forced: ReadonlySet<string> | undefined
+  #refreshContext: Record<string, unknown> | undefined
+  #watchHandle: WatchHandle | undefined
   #abort = new AbortController()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
@@ -169,8 +178,13 @@ export class Builder {
     })
   }
 
-  async build(): Promise<BuildResult> {
+  async build(options: BuildOptions = {}): Promise<BuildResult> {
     const started = performance.now()
+    // Relative paths from the watcher are matched per collection, so store
+    // them absolute and narrow later.
+    this.#changedPaths = options.changed
+    this.#forced = options.forceLoaders
+    this.#refreshContext = options.refreshContext
     for (const k of Object.keys(this.phases)) delete this.phases[k]
     this.#scanned = 0
     this.#assets.reset()
@@ -248,7 +262,93 @@ export class Builder {
       diagnostics: diagnostics.items
     }
     this.#emit({ type: 'build:end', result })
+    this.#changedPaths = undefined
+    this.#forced = undefined
+    this.#refreshContext = undefined
     return result
+  }
+
+  /**
+   * Rebuild whenever content changes.
+   *
+   * Pass the host's watcher when one exists — Vite and Nuxt already run one
+   * over the project, and a second doubles the handles and the events.
+   */
+  async watch(options: WatchOptions = {}): Promise<WatchHandle> {
+    const config = this.#config ?? (await this.resolve())
+    if (this.#watchHandle) return this.#watchHandle
+
+    const handle = await startWatch(
+      config,
+      {
+        logger: this.#logger,
+        rebuild: async (changed, reason) => {
+          this.#emit({ type: 'watch:change', path: reason })
+          return await this.build({ changed: this.#toRelative(changed, config) })
+        },
+        reload: async () => {
+          const previous = this.#config
+          try {
+            await this.resolve()
+          } catch (error) {
+            // Keep serving the last good output: a config saved mid-edit is
+            // usually a syntax error that the next keystroke fixes.
+            this.#config = previous
+            this.#logger.warn(
+              `config reload failed, keeping the previous one: ${(error as Error).message}`
+            )
+            return undefined
+          }
+          this.#resetCaches()
+          return await this.build()
+        }
+      },
+      options
+    )
+    this.#watchHandle = handle
+    return handle
+  }
+
+  /**
+   * Refetch remote collections on demand.
+   *
+   * The entry point a CMS webhook calls: `context` reaches the loader as
+   * `refreshContext`, so a handler can re-fetch one entry rather than the whole
+   * collection. Astro has this and nothing else in this space does.
+   */
+  async refreshContent(options: RefreshOptions = {}): Promise<BuildResult> {
+    return await this.build({
+      ...(options.loaders === undefined ? {} : { forceLoaders: new Set(options.loaders) }),
+      ...(options.context === undefined ? {} : { refreshContext: options.context })
+    })
+  }
+
+  async close(): Promise<void> {
+    this.#abort.abort()
+    await this.#watchHandle?.close()
+    this.#watchHandle = undefined
+  }
+
+  /** A watcher reports absolute paths; collections match on relative ones. */
+  #toRelative(changed: ReadonlySet<string>, config: ResolvedConfig): Set<string> {
+    const out = new Set<string>()
+    for (const absolute of changed) {
+      for (const collection of Object.values(config.collections)) {
+        if (!collection.directory) continue
+        const rel = relative(collection.directory, absolute)
+        if (!rel.startsWith('..') && !isAbsolute(rel)) out.add(toPosix(rel))
+      }
+    }
+    return out
+  }
+
+  /** Everything derived from the config must go when the config does. */
+  #resetCaches(): void {
+    this.#cache.clear()
+    this.#previous.clear()
+    this.#emitStats = undefined
+    this.#transformCache = undefined
+    this.#remote = undefined as unknown as RemoteStore
   }
 
   /**
@@ -313,7 +413,12 @@ export class Builder {
       stack,
       collection
     )
-    const collected = await this.#time('read', () => collectFiles(collection, config, previous))
+    const collected = await this.#time('read', () =>
+      collectFiles(collection, config, {
+        ...(previous === undefined ? {} : { previous }),
+        ...(this.#changedPaths === undefined ? {} : { changed: this.#changedPaths })
+      })
+    )
 
     // Read failures are diagnostics, never silence. An fd-exhausted or
     // permission-denied build must be visible and must fail.
@@ -604,6 +709,8 @@ export class Builder {
       config,
       signal: this.#abort.signal,
       frozen: config.frozen,
+      forced: this.#forced?.has(collection.name) ?? false,
+      ...(this.#refreshContext === undefined ? {} : { refreshContext: this.#refreshContext }),
       digest: input => digestOf(input),
       snapshot: () => this.#remote.snapshot(collection.name),
       save: records => this.#remote.save(collection.name, records)
@@ -818,7 +925,7 @@ export class Builder {
           .filter((d): d is AnyDocument => d !== undefined)
           .sort((a, b) => (a._meta.id < b._meta.id ? -1 : a._meta.id > b._meta.id ? 1 : 0))
       }
-      const collected = await collectFiles(collection, config)
+      const collected = await collectFiles(collection, config, {})
       const groups = await mapLimit(collected.files, config.concurrency, async file =>
         this.#parseFile(file, collection, config, diagnostics, false)
       )
