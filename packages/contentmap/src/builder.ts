@@ -122,7 +122,7 @@ export class Builder {
       documents += result.entries.length
       cacheHits += result.cacheHits
       await this.#time('emit', () =>
-        emitCollection({ collection, entries: result.entries, config, stats })
+        emitCollection({ collection, entries: result.entries, config, stats, diagnostics })
       )
     }
 
@@ -279,11 +279,14 @@ export class Builder {
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
     file: { relativePath: string; absolutePath: string; content: string },
+    body: string,
     diagnostics: DiagnosticBag
   ): Promise<Record<string, unknown> | undefined> {
     const ctx = createTransformContext({
       meta: documentMeta,
-      body: (validated[BODY_FIELD] as string | undefined) ?? '',
+      // The parser's body, NOT validated[BODY_FIELD]: a schema that does not
+      // declare `content` has it stripped, which would leave ctx.body empty.
+      body,
       path: file.absolutePath,
       renderer: this.#config?.renderer,
       logger: this.#logger
@@ -443,6 +446,7 @@ export class Builder {
           validated,
           documentMeta,
           file,
+          record.body ?? '',
           diagnostics
         )
         if (transformed === undefined) continue

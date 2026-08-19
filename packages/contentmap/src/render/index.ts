@@ -1,5 +1,6 @@
 export {
   buildToc,
+  DEFAULT_EXCERPT_SEPARATOR,
   decodeEntities,
   excerptOf,
   htmlToHeadings,

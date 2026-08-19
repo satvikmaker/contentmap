@@ -211,9 +211,16 @@ export type NotSerializable =
  * round-trip through our serializer, so only the genuinely unemittable types
  * are rejected. Recursion is bounded by `Depth` to keep tsc cheap.
  */
+type IsAny<T> = 0 extends 1 & T ? true : false
+
 export type HasUnserializable<T, Depth extends readonly unknown[] = []> = Depth['length'] extends 6
   ? false
-  : T extends (...args: never[]) => unknown
+  : // `any` satisfies BOTH branches of every conditional, so it resolves to
+    // `boolean` and `true extends boolean` reports a false positive — a schema
+    // using z.any() would be rejected as unemittable.
+    IsAny<T> extends true
+    ? false
+    : T extends (...args: never[]) => unknown
     ? true
     : T extends symbol
       ? true

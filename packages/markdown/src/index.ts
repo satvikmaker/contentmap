@@ -13,6 +13,8 @@ export interface MarkdownOptions {
 }
 
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/gm
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/
+const INDENTED_CODE = /^(?: {4}|\t)/
 
 /**
  * The default contentmap renderer.
@@ -38,11 +40,13 @@ export function markdown(options: MarkdownOptions = {}): Renderer {
       return marked.parse(input.body) as string
     },
     // Reading headings from the source skips a full render for callers that
-    // only want a table of contents.
+    // only want a table of contents. Code has to be masked first, or a `#` line
+    // inside a fence becomes a phantom TOC entry pointing at an anchor the
+    // rendered HTML never emitted.
     headings(input: RenderInput) {
       const seen = new Map<string, number>()
       const out: { depth: number; text: string; id: string }[] = []
-      for (const match of input.body.matchAll(HEADING)) {
+      for (const match of maskCode(input.body).matchAll(HEADING)) {
         const text = stripInline(match[2] ?? '')
         if (text === '') continue
         out.push({ depth: (match[1] ?? '#').length, text, id: uniqueSlug(text, seen) })
@@ -72,6 +76,44 @@ function headingIdExtension(): MarkedExtension {
       }
     }
   }
+}
+
+/**
+ * Blank out code spans, fences and indented blocks, preserving line count so
+ * positions stay meaningful.
+ *
+ * Scanned line by line rather than by regex: a multiline fence pattern anchored
+ * with /m terminates at the first line end, which masks only the first line of
+ * a block and lets the rest through as phantom headings.
+ */
+function maskCode(source: string): string {
+  const lines = source.split('\n')
+  const out: string[] = []
+  let fence: string | undefined
+
+  for (const line of lines) {
+    if (fence !== undefined) {
+      out.push(blank(line))
+      // A closing fence must be at least as long as the one that opened it.
+      const close = FENCE_OPEN.exec(line)
+      if (close && close[1]!.startsWith(fence[0]!) && close[1]!.length >= fence.length) {
+        fence = undefined
+      }
+      continue
+    }
+    const open = FENCE_OPEN.exec(line)
+    if (open) {
+      fence = open[1]!
+      out.push(blank(line))
+      continue
+    }
+    out.push(INDENTED_CODE.test(line) ? blank(line) : line.replace(/`[^`]*`/g, blank))
+  }
+  return out.join('\n')
+}
+
+function blank(text: string): string {
+  return ' '.repeat(text.length)
 }
 
 /** Remove inline markdown so a heading slug matches its visible text. */

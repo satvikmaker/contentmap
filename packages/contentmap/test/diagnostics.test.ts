@@ -54,6 +54,21 @@ describe('findKeyPosition', () => {
     expect(findKeyPosition(source, 'missing')).toBeUndefined()
   })
 
+  it('never points at prose that merely looks like a key', () => {
+    // Scanning the whole file drew the caret onto a code sample in the body.
+    const doc = ['---', 'author: a', '---', '', 'title: only in the body'].join('\n')
+    expect(findKeyPosition(doc, 'title')).toBeUndefined()
+  })
+
+  it('stops at the closing delimiter', () => {
+    const doc = ['---', 'a: 1', '---', 'b: 2'].join('\n')
+    expect(findKeyPosition(doc, 'b')).toBeUndefined()
+  })
+
+  it('returns undefined when there is no frontmatter at all', () => {
+    expect(findKeyPosition('title: not frontmatter', 'title')).toBeUndefined()
+  })
+
   it('is not fooled by a substring key', () => {
     expect(findKeyPosition('---\nsubtitle: x\ntitle: y\n---', 'title')).toEqual({
       line: 3,

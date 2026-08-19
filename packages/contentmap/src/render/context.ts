@@ -12,7 +12,14 @@ import type {
   TransformContext
 } from '../types.ts'
 import { SKIP } from '../types.ts'
-import { buildToc, excerptOf, htmlToHeadings, htmlToPlain, readingTimeOf } from './derive.ts'
+import {
+  buildToc,
+  DEFAULT_EXCERPT_SEPARATOR,
+  excerptOf,
+  htmlToHeadings,
+  htmlToPlain,
+  readingTimeOf
+} from './derive.ts'
 
 export class MissingRendererError extends Error {
   override readonly name = 'MissingRendererError'
@@ -86,7 +93,21 @@ export function createTransformContext(input: ContextInput): TransformContext {
     markdown,
     plain,
     async excerpt(options: ExcerptOptions = {}): Promise<string> {
-      return excerptOf(await plain(), body, options)
+      const separator = options.separator ?? DEFAULT_EXCERPT_SEPARATOR
+      if (separator !== false && separator !== '') {
+        const cut = body.indexOf(separator)
+        if (cut !== -1) {
+          // Render only the prefix, so the marker path returns prose rather
+          // than the raw markdown that stripping tags off a source string
+          // leaves behind (`**bold**`, backticks and all).
+          const prefix = body.slice(0, cut)
+          const rendered = renderer
+            ? htmlToPlain(await renderer.toHtml({ body: prefix, path, meta }))
+            : htmlToPlain(prefix)
+          return rendered.trim()
+        }
+      }
+      return excerptOf(await plain(), options)
     },
     async toc(options: TocOptions = {}): Promise<TocEntry[]> {
       return buildToc(await headings(), options)

@@ -6,6 +6,9 @@ import { createBuilder } from '../src/builder.ts'
 import { fixtureTest } from './helpers.ts'
 
 const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
+const MARKDOWN_SRC = pathToFileURL(
+  resolve(import.meta.dirname, '../../markdown/src/index.ts')
+).href
 const config = (body: string): string =>
   `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}\n` +
   `import { z } from 'zod'\n\n${body}\n`
@@ -253,5 +256,64 @@ export default defineConfig({ collections: { a } })`)({ fixture })
 const a = defineCollection({ name: 'a', directory: 'content', include: '*.md', schema: z.object({ t: z.string() }) })
 export default defineConfig({ collections: { a }, output: { types: 'explicit' } })`)({ fixture })
     ).rejects.toThrow(/not implemented/)
+  })
+})
+
+
+describe('transform context', () => {
+  const withRenderer = (extra: string) =>
+    `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}\n` +
+    `import { markdown } from ${JSON.stringify(MARKDOWN_SRC)}\n` +
+    `import { z } from 'zod'\n\n${extra}\n`
+
+  fixtureTest('gives the transform the body even when the schema drops it', async ({ fixture }) => {
+    // Most schemas do NOT declare `content` — the body is reached through
+    // ctx.markdown(). Reading it back out of the validated document meant the
+    // validator had already stripped it, so ctx.body was empty, markdown()
+    // returned "" and readingTime() reported 0 words. Silently, exit 0.
+    await fixture.write(
+      'contentmap.config.ts',
+      withRenderer(`
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async (doc, ctx) => ({
+    title: doc.title,
+    bodyLength: ctx.body.length,
+    html: await ctx.markdown(),
+    words: (await ctx.readingTime()).words
+  })
+})
+export default defineConfig({ collections: { posts }, renderer: markdown() })`)
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n\nOne two three four five.')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+
+    const source = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(source).toContain('bodyLength: 24')
+    expect(source).toContain('words: 5')
+    expect(source).toContain('<p>One two three four five.</p>')
+  })
+
+  fixtureTest('reports an unserializable transform result against its file', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      withRenderer(`
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: (doc) => ({ title: doc.title, render: () => 'nope' })
+})
+export default defineConfig({ collections: { posts }, renderer: markdown() })`)
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nbody')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBeGreaterThan(0)
+    const d = result.diagnostics.find(x => x.code === 'CM_SERIALIZE')
+    expect(d?.file).toBe('a.md')
+    expect(d?.message).toMatch(/function/i)
   })
 })

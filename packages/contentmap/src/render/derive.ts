@@ -130,23 +130,16 @@ export function readingTimeOf(plain: string, options: ReadingTimeOptions = {}): 
   }
 }
 
-/**
- * Excerpt.
- *
- * Cuts on a word boundary and honours an explicit marker. Velite slices the
- * raw string at a byte offset, so it routinely ends mid-word.
- */
-export function excerptOf(
-  plain: string,
-  body: string,
-  options: { length?: number; separator?: string | false } = {}
-): string {
-  const separator = options.separator ?? '<!--more-->'
-  if (separator !== false && separator !== '') {
-    const cut = body.indexOf(separator)
-    if (cut !== -1) return htmlToPlain(body.slice(0, cut)).trim()
-  }
+export const DEFAULT_EXCERPT_SEPARATOR = '<!--more-->'
 
+/**
+ * Truncate plain text on a word boundary.
+ *
+ * Velite slices the raw string at a byte offset, so it routinely ends mid-word.
+ * Input must already be plain text — honouring an explicit cut marker needs the
+ * renderer and is handled by the transform context.
+ */
+export function excerptOf(plain: string, options: { length?: number } = {}): string {
   const length = options.length ?? 260
   if (plain.length <= length) return plain
 

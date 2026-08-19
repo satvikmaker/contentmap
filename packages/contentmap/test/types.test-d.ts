@@ -14,6 +14,12 @@ describe('serializability is enforced at compile time', () => {
     expectTypeOf<HasUnserializable<{ a: { b: () => void } }>>().toEqualTypeOf<true>()
     expectTypeOf<HasUnserializable<{ a: Array<() => void> }>>().toEqualTypeOf<true>()
     expectTypeOf<HasUnserializable<{ a: symbol }>>().toEqualTypeOf<true>()
+
+    // `any` satisfies both branches of every conditional, so an unguarded
+    // check resolves to `boolean` and rejects z.any() as unemittable.
+    expectTypeOf<HasUnserializable<{ a: any }>>().toEqualTypeOf<false>()
+    expectTypeOf<HasUnserializable<{ a: unknown }>>().toEqualTypeOf<false>()
+    expectTypeOf<HasUnserializable<Record<string, unknown>>>().toEqualTypeOf<false>()
   })
 
   it('accepts a schema whose output is serializable', () => {

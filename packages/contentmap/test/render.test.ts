@@ -130,25 +130,35 @@ describe('readingTime', () => {
 describe('excerpt', () => {
   const long = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '.repeat(20)
 
-  it('honours an explicit marker', async () => {
-    const body = 'The visible part.\n\n<!--more-->\n\nThe hidden part.'
-    expect(excerptOf('irrelevant', body)).toBe('The visible part.')
-  })
-
   it('cuts on a word boundary, not mid-word', () => {
-    const out = excerptOf(long, long, { length: 50 })
+    const out = excerptOf(long, { length: 50 })
     expect(out.endsWith('\u2026')).toBe(true)
     // velite slices at a byte offset and routinely splits a word
     expect(out.slice(0, -1)).toMatch(/[\p{L}\p{N}]$/u)
   })
 
   it('returns short text unchanged', () => {
-    expect(excerptOf('short', 'short')).toBe('short')
+    expect(excerptOf('short')).toBe('short')
+  })
+})
+
+describe('excerpt marker', () => {
+  const marked = markdown()
+  const body = 'Intro with **bold** and `code`.\n\n<!--more-->\n\nThe hidden part.'
+
+  it('renders the prefix rather than returning raw markdown', async () => {
+    // Stripping tags off a source string leaves `**bold**` and backticks
+    // behind; the prefix has to go through the renderer.
+    expect(await ctx(body, marked).excerpt()).toBe('Intro with bold and code.')
   })
 
-  it('can disable the marker', () => {
-    const body = 'a<!--more-->b'
-    expect(excerptOf('ab', body, { separator: false })).toBe('ab')
+  it('can disable the marker and fall back to truncation', async () => {
+    const out = await ctx(body, marked).excerpt({ separator: false })
+    expect(out).toContain('hidden part')
+  })
+
+  it('works without a renderer, degrading to source stripping', async () => {
+    expect(await ctx(body).excerpt()).toContain('Intro with')
   })
 })
 
@@ -247,6 +257,42 @@ describe('renderer conformance', () => {
   it('agrees on reading time across renderers', async () => {
     const [a, b] = await Promise.all(RENDERERS.map(r => ctx(SOURCE, r.renderer).readingTime()))
     expect(a).toEqual(b)
+  })
+})
+
+describe('code is not mistaken for content', () => {
+  const marked = markdown()
+  const source = [
+    '# Real Heading',
+    '',
+    '```md',
+    '# Phantom One',
+    '## Phantom Two',
+    '```',
+    '',
+    '    # Indented Phantom',
+    '',
+    '## Second Real'
+  ].join('\n')
+
+  it('never lists a heading the HTML did not emit', async () => {
+    // A phantom entry points the TOC at an anchor that does not exist.
+    const toc = await ctx(source, marked).toc({ minDepth: 1, maxDepth: 6 })
+    const ids = toc.flatMap(e => [e.id, ...e.children.map(c => c.id)])
+    expect(ids).toEqual(['real-heading', 'second-real'])
+  })
+
+  it('agrees with the rendered anchors', async () => {
+    const c = ctx(source, marked)
+    const html = await c.markdown()
+    const toc = await c.toc({ minDepth: 1, maxDepth: 6 })
+    for (const entry of toc) expect(html).toContain(`id="${entry.id}"`)
+  })
+
+  it('closes a fence only on a delimiter at least as long', async () => {
+    const nested = ['````md', '```', '# Still Code', '```', '````', '', '# Real'].join('\n')
+    const toc = await ctx(nested, marked).toc({ minDepth: 1, maxDepth: 6 })
+    expect(toc.map(e => e.id)).toEqual(['real'])
   })
 })
 

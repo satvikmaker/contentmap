@@ -39,19 +39,33 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 
+const DELIMITER = /^(---|\+\+\+|;;;)\s*$/
+
 /**
  * Find the line a top-level frontmatter key sits on.
  *
  * A validator reports the field path but knows nothing about the file, so this
  * is what turns `title: too long` into a caret on the offending line.
+ *
+ * The search is confined to the frontmatter block. Scanning the whole file
+ * meant prose containing `title:` — a line in a code sample, say — attracted
+ * the caret, pointing the reader at text that has nothing to do with the error.
+ * A file with no frontmatter has no key to find.
  */
 export function findKeyPosition(source: string, field: string): Position | undefined {
   const root = field.split(/[.[]/)[0]
   if (!root) return undefined
+
   const lines = source.split(/\r?\n/)
+  const first = lines[0]
+  if (first === undefined || !DELIMITER.test(first)) return undefined
+
   const pattern = new RegExp(`^(\\s*)(["']?)${escapeRegExp(root)}\\2\\s*:`)
-  for (let i = 0; i < lines.length; i++) {
-    const match = pattern.exec(lines[i] ?? '')
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    // The closing delimiter ends the block; nothing past it is frontmatter.
+    if (DELIMITER.test(line)) return undefined
+    const match = pattern.exec(line)
     if (match) return { line: i + 1, column: (match[1]?.length ?? 0) + 1 }
   }
   return undefined

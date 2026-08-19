@@ -6,7 +6,8 @@ import { digest } from '../utils/digest.ts'
 import { withFdRetry } from '../utils/fd.ts'
 import { mapLimit } from '../utils/limit.ts'
 import { toPosix } from '../utils/paths.ts'
-import { moduleNameFor, serialize, serializeAt } from './serialize.ts'
+import type { DiagnosticBag } from '../diagnostics/index.ts'
+import { moduleNameFor, serialize, SerializeError, serializeAt } from './serialize.ts'
 
 export interface EmitStats {
   written: number
@@ -124,6 +125,7 @@ export interface EmitCollectionInput {
   entries: readonly StoreEntry[]
   config: ResolvedConfig
   stats: EmitStats
+  diagnostics: DiagnosticBag
 }
 
 /** One module per document plus a thin index that lazily imports them. */
@@ -131,7 +133,8 @@ export async function emitCollection({
   collection,
   entries,
   config,
-  stats
+  stats,
+  diagnostics
 }: EmitCollectionInput): Promise<void> {
   const dir = join(config.output.dir, collection.name)
   if (!stats.dryRun) await mkdir(dir, { recursive: true })
@@ -167,7 +170,6 @@ export async function emitCollection({
     const mod = moduleNameFor(entry.id)
     const file = `${mod}.js`
     const path = join(dir, file)
-    if (emitModules) expected.add(file)
     const fresh = stats.sources.get(path) !== entry.digest
 
     // Reuse the serialized index fragment when the source is unchanged. This is
@@ -175,13 +177,35 @@ export async function emitCollection({
     let row = fresh ? undefined : stats.rows.get(path)
     let full: Record<string, unknown> | undefined
     if (row === undefined) {
-      const split = splitFields(entry, collection)
-      full = split.full
-      row = serializeAt(emitModules ? split.index : split.full, 1)
+      try {
+        const split = splitFields(entry, collection)
+        full = split.full
+        row = serializeAt(emitModules ? split.index : split.full, 1)
+      } catch (error) {
+        // A transform that returns something unemittable is a problem with one
+        // document, not with the build. Naming the file and dropping the
+        // document beats an unattributed crash — velite's `s.isodate()` throws
+        // a bare RangeError with no filename, which on a large corpus is
+        // unsearchable.
+        diagnostics.add({
+          code: 'CM_SERIALIZE',
+          severity: 'error',
+          message: error instanceof SerializeError ? error.message : String(error),
+          file: entry.meta.filePath,
+          collection: collection.name,
+          documentId: entry.id,
+          ...(error instanceof SerializeError && error.path !== '$'
+            ? { field: error.path.replace(/^\$\.?/, '') }
+            : {}),
+          hint: 'Documents are written to disk as JavaScript. Return plain data from `transform`.'
+        })
+        return undefined
+      }
       stats.rows.set(path, row)
     }
     indexRows.push(row)
     if (!emitModules) return undefined
+    expected.add(file)
     loaders.push(`  ${JSON.stringify(entry.id)}: () => import('./${file}')`)
     return { entry, full, path }
   })
