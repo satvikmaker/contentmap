@@ -82,7 +82,7 @@ Three tools own this space, and each hit a wall. We read all of their source and
 - **Velite** has the best asset pipeline in the space — and **74% of its source is a vendored fork of Zod 3**. It emits schema-violating data and exits 0 by default; a real violation logs at `info` while its own advisory note logs at `warning`.
 - **Content Collections** has the best DX and the cleanest dependency posture — and under a modest file-descriptor limit it **silently lost 2,758 of 3,000 documents and exited 0**, because errors are emitted before a consumer can subscribe. It has no image support at all.
 
-And all three emit one array literal per collection. That single decision is why Contentlayer produced a **489 MB** generated file at 15k documents, why reading one title from a 5,000-post Content Collections build bundles **17.1 MB**, and why a one-character edit costs a 2-second rebuild.
+And all three emit one array literal per collection. That single decision is why Contentlayer produced a **489 MB** generated file at 15k documents, why an ordinary 680-post blog produces a **27 MiB** Content Collections module, and why a one-character edit costs a 2-second rebuild.
 
 ## What's different
 
