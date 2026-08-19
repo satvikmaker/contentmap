@@ -105,6 +105,7 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
 
   return {
     dryRun: options.dryRun ?? false,
+    frozen: options.frozen ?? false,
     root: base,
     configPath,
     configDeps: loaded.deps,
@@ -165,11 +166,23 @@ function validateCollections(
       )
     }
     names.set(name, key)
-    if (!def.directory) {
-      throw new ConfigError(`Collection "${name}" is missing \`directory\``)
-    }
-    if (!def.include) {
-      throw new ConfigError(`Collection "${name}" is missing \`include\``)
+    if (def.loader) {
+      if (def.directory ?? def.include) {
+        throw new ConfigError(
+          `Collection "${name}" sets both \`loader\` and \`directory\`/\`include\``,
+          'A collection has one source. Remove the file options, or remove the loader.'
+        )
+      }
+    } else {
+      if (!def.directory) {
+        throw new ConfigError(
+          `Collection "${name}" is missing \`directory\``,
+          'File-based collections need `directory` and `include`; other sources need a `loader`.'
+        )
+      }
+      if (!def.include) {
+        throw new ConfigError(`Collection "${name}" is missing \`include\``)
+      }
     }
     // arktype's Type is CALLABLE, so a `typeof === "object"` check rejects a
     // perfectly valid Standard Schema implementation. Test for the interface,
@@ -206,7 +219,7 @@ function validateCollections(
       ...def,
       name,
       typeName,
-      directory: resolve(base, def.directory),
+      ...(def.directory === undefined ? {} : { directory: resolve(base, def.directory) }),
       heavy
     }
   }

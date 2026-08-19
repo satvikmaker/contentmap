@@ -10,7 +10,8 @@
  *  - `load()` is the ONLY method that triggers a dynamic import
  */
 
-export type Loader<T> = () => Promise<{ default: T }>
+/** A lazily imported document module, as the generated index emits it. */
+export type ModuleLoader<T> = () => Promise<{ default: T }>
 
 export interface Query<T, K extends keyof T = keyof T> {
   /** Narrow the projection. Chaining only ever narrows further. */
@@ -33,7 +34,7 @@ export interface Query<T, K extends keyof T = keyof T> {
 
 interface State<T> {
   readonly index: readonly Record<string, unknown>[]
-  readonly modules: Record<string, Loader<T>>
+  readonly modules: Record<string, ModuleLoader<T>>
   readonly keys: readonly string[] | null
   readonly rows: readonly Record<string, unknown>[]
 }
@@ -139,7 +140,7 @@ function make<T, K extends keyof T>(state: State<T>): Query<T, K> {
 /** Called by generated code. Not intended for direct use. */
 export function collection<T>(
   index: readonly Record<string, unknown>[],
-  modules: Record<string, Loader<T>>
+  modules: Record<string, ModuleLoader<T>>
 ): Query<T> {
   return make<T, keyof T>({ index, modules, keys: null, rows: index })
 }

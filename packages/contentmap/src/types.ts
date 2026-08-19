@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Loader } from './loaders/types.ts'
 
 type InferOutput<T extends StandardSchemaV1> = StandardSchemaV1.InferOutput<T>
 
@@ -280,8 +281,15 @@ export interface CollectionDefinition<
   TOut = unknown
 > {
   name: string
-  directory: string
-  include: string | readonly string[]
+  /**
+   * Where the documents come from.
+   *
+   * Supply a `loader` for anything that is not local files. `directory` and
+   * `include` are then unused.
+   */
+  loader?: Loader
+  directory?: string
+  include?: string | readonly string[]
   exclude?: string | readonly string[]
   parser?: string | Parser
   schema: TSchema
@@ -405,6 +413,7 @@ export interface ResolvedOutput {
 
 export interface ResolvedConfig {
   dryRun: boolean
+  frozen: boolean
   root: string
   configPath: string
   /** Files whose change should reload the config. */
@@ -465,6 +474,8 @@ export interface BuildResult {
 
 export interface BuilderOptions {
   config?: string
+  /** Refuse network access; remote collections must be satisfied from cache. */
+  frozen?: boolean
   root?: string
   outDir?: string
   concurrency?: number

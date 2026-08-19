@@ -28,8 +28,11 @@ import {
   type EmitStats
 } from './write/emit.ts'
 import { mapLimit } from './utils/limit.ts'
-import { cacheKey, stableStringify } from './utils/digest.ts'
+import { cacheKey, digest as digestOf, stableStringify } from './utils/digest.ts'
 import { TransformCache } from './cache/index.ts'
+import { RemoteStore } from './loaders/meta.ts'
+import type { LoadedRecord, LoaderContext } from './loaders/types.ts'
+import { redactSecrets } from './security/secrets.ts'
 import { suggest } from './utils/paths.ts'
 /** Field the frontmatter parsers write the document body into. */
 const BODY_FIELD = 'content'
@@ -119,6 +122,8 @@ export class Builder {
   #watchFor = new Map<string, string[]>()
   /** Per-build memo of every validated document in a collection, for siblings(). */
   #validated = new Map<string, Promise<AnyDocument[]>>()
+  #remote!: RemoteStore
+  #abort = new AbortController()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
     warn: message => this.#emit({ type: 'log', level: 'warn', message }),
@@ -180,6 +185,7 @@ export class Builder {
       config.configDigest
     )
     this.#transformCache.reset()
+    this.#remote ??= new RemoteStore(join(config.output.dir, '.cache', 'remote'))
 
     if (config.output.clean) await cleanOutput(config)
 
@@ -217,6 +223,7 @@ export class Builder {
     )
 
     await this.#transformCache?.flush(config.dryRun)
+    await this.#remote?.flush(config.dryRun)
 
     await emitBarrel(config, stats)
     await emitTypes(config, stats)
@@ -283,6 +290,9 @@ export class Builder {
     diagnostics: DiagnosticBag,
     stack: readonly string[]
   ): Promise<CollectionResult> {
+    if (collection.loader) {
+      return await this.#buildFromLoader(collection, config, diagnostics, stack)
+    }
     const cachedEntries = this.#cache.get(collection.name) ?? []
 
     // A document whose IMAGE changed is stale even though its own file did not.
@@ -315,7 +325,7 @@ export class Builder {
       diagnostics.add({
         code: 'CM_NO_MATCH',
         severity: 'warning',
-        message: `No files matched in ${collection.directory}`,
+        message: `No files matched in ${String(collection.directory)}`,
         collection: collection.name,
         hint: `Pattern: ${String(collection.include)}`
       })
@@ -379,13 +389,7 @@ export class Builder {
 
     // Stable by id so output is byte-reproducible, then the user's sort.
     unique.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    if (collection.sort) {
-      const docs = unique.map(e => ({ ...e.data, _meta: e.meta }))
-      const order = unique.map((_, i) => i)
-      const compare = collection.sort
-      order.sort((x, y) => compare(docs[x]!, docs[y]!))
-      unique.splice(0, unique.length, ...order.map(i => unique[i]!))
-    }
+    if (collection.sort) applySort(unique, collection.sort)
 
     if (collection.single && unique.length !== 1) {
       diagnostics.add({
@@ -395,7 +399,7 @@ export class Builder {
         collection: collection.name,
         hint:
           unique.length === 0
-            ? `No file matched ${String(collection.include)} in ${collection.directory}.`
+            ? `No file matched ${String(collection.include)} in ${String(collection.directory)}.`
             : `Matched: ${unique.map(e => e.meta.filePath).join(', ')}`
       })
     }
@@ -559,6 +563,207 @@ export class Builder {
   }
 
   /**
+   * Build a collection from a loader rather than from files.
+   *
+   * The shape mirrors the file path deliberately: records are validated,
+   * transformed and cached the same way, so a remote collection is a first
+   * class citizen rather than a bolt-on. What differs is identity — a record
+   * has no path, so the loader must supply an id — and change detection, which
+   * uses the record digest the loader reports.
+   */
+  async #buildFromLoader(
+    collection: CollectionDefinition,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<CollectionResult> {
+    const loader = collection.loader!
+    await this.#remote.load(collection.name)
+
+    const context: LoaderContext = {
+      collection: collection.name,
+      meta: this.#remote.metaStore(collection.name),
+      logger: this.#logger,
+      config,
+      signal: this.#abort.signal,
+      frozen: config.frozen,
+      digest: input => digestOf(input),
+      snapshot: () => this.#remote.snapshot(collection.name),
+      save: records => this.#remote.save(collection.name, records)
+    }
+
+    let loaded
+    try {
+      loaded = await this.#time('load', () => Promise.resolve(loader.load(context)))
+    } catch (error) {
+      const err = error as Error & { hint?: string }
+      diagnostics.add({
+        code: 'CM_LOADER',
+        severity: 'error',
+        // Redacted: a failing request must not print a token into CI logs.
+        message: redactSecrets(err.message ?? String(error)),
+        collection: collection.name,
+        ...(err.hint === undefined ? {} : { hint: redactSecrets(err.hint) })
+      })
+      return { entries: [], cacheHits: 0 }
+    }
+
+    const cached = this.#cache.get(collection.name) ?? []
+    const previousDigests = new Map(cached.map(e => [e.id, e.digest] as const))
+    const reusable = new Map(cached.map(e => [e.id, e] as const))
+
+    const entries: StoreEntry[] = []
+    let cacheHits = 0
+    const seen = new Map<string, number>()
+
+    // Remote endpoints rate-limit; local disks do not. This is deliberately not
+    // the file-read concurrency.
+    const results = await mapLimit(loaded.records, REMOTE_CONCURRENCY, async record => {
+      this.#scanned += 1
+
+      const duplicate = seen.get(record.id)
+      if (duplicate !== undefined) {
+        diagnostics.add({
+          code: 'CM_DUPLICATE_ID',
+          severity: 'error',
+          message: `Duplicate record id "${record.id}" from loader "${loader.name}"`,
+          collection: collection.name,
+          documentId: record.id,
+          hint: 'Ids must be unique within a collection. Check the loader\'s `id` function.'
+        })
+        return undefined
+      }
+      seen.set(record.id, 1)
+
+      const unchanged = previousDigests.get(record.id) === record.digest
+      const prior = reusable.get(record.id)
+      if (unchanged && prior) {
+        cacheHits += 1
+        await this.#transformCache?.retain(collection.name, record.id)
+        return prior
+      }
+
+      return await this.#processRecord(record, collection, config, diagnostics, stack)
+    })
+
+    for (const entry of results) if (entry) entries.push(entry)
+    entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    if (collection.sort) applySort(entries, collection.sort)
+
+    if (collection.single && entries.length !== 1) {
+      diagnostics.add({
+        code: 'CM_SINGLETON',
+        severity: 'error',
+        message: `Collection "${collection.name}" is \`single\` but the loader produced ${entries.length} records`,
+        collection: collection.name
+      })
+    }
+
+    this.#cache.set(collection.name, entries)
+    return { entries, cacheHits }
+  }
+
+  /** Validate and transform one loader record. */
+  async #processRecord(
+    record: LoadedRecord,
+    collection: CollectionDefinition,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<StoreEntry | undefined> {
+    const source = `${collection.loader!.name}:${record.id}`
+    const meta: DocumentMeta = {
+      id: record.id,
+      filePath: source,
+      fileName: record.id,
+      directory: collection.loader!.name,
+      extension: '',
+      path: record.id,
+      slug: record.id.split('/').pop() ?? record.id,
+      digest: record.digest
+    }
+
+    const raw: Record<string, unknown> = { ...record.data }
+    let injectedBody: string | undefined
+    if (record.body !== undefined && !(BODY_FIELD in raw)) {
+      raw[BODY_FIELD] = record.body
+      injectedBody = BODY_FIELD
+    }
+
+    const policy = config.onValidationError
+    const result = await validate(collection.schema, raw)
+    if (!result.ok) {
+      if (policy !== 'ignore') {
+        for (const issue of result.issues) {
+          diagnostics.add({
+            code: 'CM_VALIDATION',
+            severity: policy === 'fail' ? 'error' : 'warning',
+            message: issue.message,
+            file: source,
+            ...(issue.path === undefined ? {} : { field: issue.path }),
+            collection: collection.name,
+            documentId: record.id,
+            ...hintFor(issue.path, Object.keys(raw))
+          })
+        }
+      }
+      if (policy !== 'warn') return undefined
+    } else {
+      reportUnknownFields(raw, result.value, injectedBody, {
+        file: source,
+        source: '',
+        collection: collection.name,
+        documentId: record.id,
+        policy: config.onUnknownField,
+        diagnostics
+      })
+    }
+
+    let data: Record<string, unknown> = result.ok ? result.value : raw
+    if (collection.transform) {
+      const transformed = await this.#runTransform(
+        collection,
+        data,
+        meta,
+        { relativePath: source, absolutePath: source, content: '' },
+        record.body ?? '',
+        diagnostics,
+        stack
+      )
+      if (transformed === undefined) {
+        const failed = refKey(collection.name, record.id)
+        this.#refsFor.delete(failed)
+        this.#watchFor.delete(failed)
+        return undefined
+      }
+      data = transformed
+    }
+
+    const ownerId = refKey(collection.name, record.id)
+    const owned = this.#assets.ownedBy(ownerId)
+    const assetDeps = owned.length === 0 ? undefined : this.#assets.dependencies(ownerId)
+    const refDeps = dedupeRefs(this.#refsFor.get(ownerId))
+    this.#refsFor.delete(ownerId)
+    this.#watchFor.delete(ownerId)
+
+    return {
+      id: record.id,
+      collection: collection.name,
+      digest: record.digest,
+      emitKey: cacheKey(
+        record.digest,
+        ...(assetDeps ?? []).map(d => d.digest),
+        ...(refDeps ?? []).map(r => `${r.collection}/${r.id}@${r.digest}`)
+      ),
+      data,
+      meta,
+      mtimeMs: 0,
+      ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
+      ...(refDeps === undefined ? {} : { refDeps })
+    }
+  }
+
+  /**
    * Every document in a collection as the schema validated it, before any
    * transform ran.
    *
@@ -577,6 +782,12 @@ export class Builder {
     if (existing) return existing
 
     const promise = (async () => {
+      if (collection.loader) {
+        // A loader-backed collection has no files to re-read; its validated
+        // form is whatever the build produced.
+        const built = this.#built.get(collection.name)
+        return (built?.entries ?? []).map(e => ({ ...e.data, _meta: e.meta }) as AnyDocument)
+      }
       const collected = await collectFiles(collection, config)
       const groups = await mapLimit(collected.files, config.concurrency, async file =>
         this.#parseFile(file, collection, config, diagnostics, false)
@@ -884,7 +1095,7 @@ export class Builder {
 
     const records = Array.isArray(parsed) ? parsed : [parsed]
     if (count) this.#scanned += records.length
-    const meta = metaFor(file, collection.directory)
+    const meta = metaFor(file, collection.directory ?? '')
     const out: ParsedDocument[] = []
 
     for (const [index, record] of records.entries()) {
@@ -1104,6 +1315,19 @@ export class MissingReferenceError extends Error {
 }
 
 const refKey = (collection: string, id: string): string => `${collection}\u0000${id}`
+
+/** Remote endpoints rate-limit; local disks do not. */
+const REMOTE_CONCURRENCY = 8
+
+function applySort(
+  entries: StoreEntry[],
+  compare: (a: AnyDocument, b: AnyDocument) => number
+): void {
+  const docs = entries.map(e => ({ ...e.data, _meta: e.meta }) as AnyDocument)
+  const order = entries.map((_, i) => i)
+  order.sort((x, y) => compare(docs[x]!, docs[y]!))
+  entries.splice(0, entries.length, ...order.map(i => entries[i]!))
+}
 
 function dedupeRefs(
   refs: readonly { collection: string; id: string; digest: string }[] | undefined

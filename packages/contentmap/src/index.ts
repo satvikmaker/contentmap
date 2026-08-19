@@ -1,4 +1,6 @@
 export { defineCollection, defineConfig, defineParser } from './config/define.ts'
+export { defineLoader, http, RemoteFetchError, RemoteStore } from './loaders/index.ts'
+export { findSecret, redactSecrets, screenForSecrets, SecretLeakError } from './security/secrets.ts'
 export { ConfigError, findConfig, resolveConfig } from './config/resolve.ts'
 export { Builder, createBuilder } from './builder.ts'
 export { run } from './cli/run.ts'
@@ -52,7 +54,17 @@ export { MissingImageProcessorError } from './render/context.ts'
 
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
 export type { HasUnserializable, InvalidType, NotSerializable } from './types.ts'
-export type { Loader, Query } from './runtime/index.ts'
+export type { ModuleLoader, Query } from './runtime/index.ts'
+export type {
+  HttpLoaderOptions,
+  LoadedRecord,
+  Loader,
+  LoaderContext,
+  LoadResult,
+  MetaStore,
+  RemoteErrorPolicy,
+  Revalidate
+} from './loaders/index.ts'
 export type {
   Asset,
   Image,

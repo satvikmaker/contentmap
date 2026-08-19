@@ -53,6 +53,12 @@ export async function collectFiles(
   config: ResolvedConfig,
   previous?: ReadonlyMap<string, PreviousState>
 ): Promise<CollectResult> {
+  // Config resolution guarantees these for file-based collections; a
+  // loader-based one never reaches here.
+  const directory = collection.directory
+  if (directory === undefined || collection.include === undefined) {
+    throw new Error(`Collection "${collection.name}" has no file source`)
+  }
   const include = Array.isArray(collection.include)
     ? [...collection.include]
     : [collection.include as string]
@@ -63,7 +69,7 @@ export async function collectFiles(
     : []
 
   const matches = await glob(include, {
-    cwd: collection.directory,
+    cwd: directory,
     ignore,
     onlyFiles: true,
     dot: false,
@@ -82,7 +88,7 @@ export async function collectFiles(
   // deliberately NOT `config.concurrency` (which governs CPU-bound work).
   const readConcurrency = config.readConcurrency ?? READ_CONCURRENCY
   const results = await mapLimit(matches, readConcurrency, async relative => {
-    const absolutePath = join(collection.directory, relative)
+    const absolutePath = join(directory, relative)
     const relativePath = toPosix(relative)
     try {
       const info = await stat(absolutePath)

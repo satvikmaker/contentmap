@@ -49,6 +49,7 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
         concurrency: { type: 'string' },
         format: { type: 'string' },
         'on-validation-error': { type: 'string' },
+        frozen: { type: 'boolean' },
         json: { type: 'boolean' },
         silent: { type: 'boolean', short: 's' },
         verbose: { type: 'boolean', short: 'v' },
@@ -76,6 +77,7 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
     ...(values.config === undefined ? {} : { config: values.config }),
     ...(values.outdir === undefined ? {} : { outDir: values.outdir }),
     ...(values.clean === undefined ? {} : { clean: values.clean }),
+    ...(values.frozen === undefined ? {} : { frozen: values.frozen }),
     ...(values.concurrency === undefined ? {} : { concurrency: Number(values.concurrency) }),
     ...(values.format === undefined ? {} : { format: values.format as EmitFormat }),
     ...(values['on-validation-error'] === undefined
