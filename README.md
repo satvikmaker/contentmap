@@ -41,12 +41,38 @@ export default defineConfig({ collections: { authors, posts } })
 ```
 
 ```ts
-import { posts, getPost } from 'contentmap/generated'
+import { posts } from 'contentmap/generated'
 
-posts[0].author.name         // string  — joined at build time
-posts[0].cover.blurDataURL   // string  — generated, zero client JS
-const one = await getPost('hello-world')   // bundles ONE document, not the corpus
+// typed projections — the result type narrows with the query
+const cards = posts
+  .where({ draft: false })
+  .select('title', 'slug', 'cover')   // → Pick<Post, 'title'|'slug'|'cover'>[]
+  .sortBy('date', 'desc')
+  .limit(10)
+  .all()
+
+cards[0].cover.blurDataURL   // ✅ generated at build time, zero client JS
+cards[0].author              // ✗ compile error — not selected
+
+const full = await posts.load('hello-world')   // bundles ONE document, not the corpus
 ```
+
+Content doesn't have to be local:
+
+```ts
+const changelog = defineCollection({
+  name: 'changelog',
+  loader: http({
+    url: 'https://api.example.com/releases',
+    headers: () => ({ Authorization: `Bearer ${process.env.API_TOKEN}` }),
+    select: r => r.items,
+    id: r => r.slug
+  }),
+  schema: z.object({ slug: z.string(), version: z.string(), body: z.string() })
+})
+```
+
+Same schema pipeline, same types, same cache. `contentmap build --frozen` refuses the network for reproducible release builds, and credentials never reach disk.
 
 ## Why
 
@@ -63,6 +89,8 @@ And all three emit one array literal per collection. That single decision is why
 | | |
 |---|---|
 | **Correct by default** | A green build cannot have silently dropped data. Enforced by a CI test that builds under `ulimit -n 64` and asserts non-zero exit |
+| **Typed projections** | `select('title','date')` narrows to `Pick<Post,…>`. The only file-based tool where the query is part of the type surface |
+| **Local and remote** | Markdown, MDX, YAML, JSON, TOML, XML, CSV — plus HTTP, git and headless CMSs through one `Loader` contract |
 | **Per-document modules** | Read one post, bundle one post. Free code-splitting, fine-grained HMR, and Turbopack compatibility |
 | **CLI-first** | `contentmap build` is the product. Every bundler plugin is a convenience wrapper — CI proves output is identical without it |
 | **Validator-agnostic** | Zod, Valibot, ArkType, Effect Schema. Zero validators in our dependency tree |
