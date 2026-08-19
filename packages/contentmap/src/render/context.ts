@@ -79,28 +79,45 @@ export function createTransformContext(input: ContextInput): TransformContext {
   const { meta, body, path, renderer, logger } = input
   const renderInput = { body, path, meta }
 
+  // Two memos over ONE render. `rawPromise` is the renderer's output;
+  // `htmlPromise` is that same output with asset URLs rewritten. Derivations
+  // take the raw form — plain text holds no URLs, so rewriting during them
+  // would copy files for a document that never emits their links — while
+  // `markdown()` takes the rewritten one. Memoising only the rewritten form
+  // made every derivation re-render.
+  let rawPromise: Promise<string> | undefined
   let htmlPromise: Promise<string> | undefined
   let plainPromise: Promise<string> | undefined
   let headingsPromise: Promise<readonly Heading[]> | undefined
 
-  const render = async (rendererOptions?: unknown, withAssets = true): Promise<string> => {
-    if (!renderer) throw new MissingRendererError('ctx.markdown()')
-    const html = await renderer.toHtml(renderInput, rendererOptions)
-    return withAssets && input.rewrite ? await input.rewrite(html) : html
+  const renderRaw = (rendererOptions?: unknown): Promise<string> => {
+    if (!renderer) return Promise.reject(new MissingRendererError('ctx.markdown()'))
+    return Promise.resolve(renderer.toHtml(renderInput, rendererOptions))
+  }
+
+  /** Renderer output, unrewritten. Memoised. */
+  const raw = (): Promise<string> => {
+    rawPromise ??= renderRaw()
+    return rawPromise
   }
 
   const markdown = (options?: MarkdownRenderOptions): Promise<string> => {
     // Options bypass the cache: a caller asking for different output should get
     // it rather than whatever the first call happened to request.
-    if (options !== undefined) return render(options.renderer, options.assets ?? true)
-    htmlPromise ??= render()
+    if (options !== undefined) {
+      const withAssets = options.assets ?? true
+      return renderRaw(options.renderer).then(html =>
+        withAssets && input.rewrite ? input.rewrite(html) : html
+      )
+    }
+    htmlPromise ??= raw().then(html => (input.rewrite ? input.rewrite(html) : html))
     return htmlPromise
   }
 
   const plain = (): Promise<string> => {
     plainPromise ??= (async () => {
       if (renderer?.toPlain) return await renderer.toPlain(renderInput)
-      if (renderer) return htmlToPlain(await markdown())
+      if (renderer) return htmlToPlain(await raw())
       // Without a renderer, fall back to the raw body. Reading time and
       // excerpts stay useful for plain-text sources rather than hard-failing.
       return htmlToPlain(body)
@@ -112,7 +129,7 @@ export function createTransformContext(input: ContextInput): TransformContext {
     headingsPromise ??= (async () => {
       if (renderer?.headings) return await renderer.headings(renderInput)
       if (!renderer) throw new MissingRendererError('ctx.toc()')
-      return htmlToHeadings(await markdown())
+      return htmlToHeadings(await raw())
     })()
     return headingsPromise
   }

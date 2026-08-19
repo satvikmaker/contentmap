@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createBuilder } from '../src/builder.ts'
@@ -285,5 +285,114 @@ describe('asset pipeline', () => {
     expect(result.errors).toBeGreaterThan(0)
     const d = result.diagnostics.find(x => x.code === 'CM_TRANSFORM')
     expect(d?.file).toBe('a.md')
+  })
+})
+
+
+describe('asset safety', () => {
+  const cfg = (transform: string, extra = '') =>
+    config(
+      COLLECTION(transform) +
+        `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image()${extra} })`
+    )
+  const RENDER = 'async (doc, ctx) => ({ title: doc.title, html: await ctx.markdown() })'
+
+  fixtureTest('never deletes files it did not write', async ({ fixture }) => {
+    // The assets directory lives inside public/, which belongs to the user.
+    // Listing it and removing everything unrecognised destroys favicons,
+    // robots.txt and anything another tool put beside our output.
+    await fixture.write('contentmap.config.ts', cfg(RENDER))
+    await fixture.writeBytes('content/hero.png', PNG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n![h](hero.png)')
+    await fixture.write('public/_content/robots.txt', 'user file')
+    await fixture.write('public/_content/favicon.ico', 'icon')
+
+    await createBuilder({ root: fixture.dir }).build()
+
+    await expect(readFile(join(fixture.dir, 'public/_content/robots.txt'), 'utf8')).resolves.toBe(
+      'user file'
+    )
+    await expect(stat(join(fixture.dir, 'public/_content/favicon.ico'))).resolves.toBeTruthy()
+  })
+
+  fixtureTest('still removes assets it wrote once nothing references them', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', cfg(RENDER))
+    await fixture.writeBytes('content/hero.png', PNG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n![h](hero.png)')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const name = /hero-[0-9a-f]{8}\.png/.exec(
+      await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    )![0]
+    await expect(stat(join(fixture.dir, 'public/_content', name))).resolves.toBeTruthy()
+
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nno image now')
+    await builder.build()
+    await expect(stat(join(fixture.dir, 'public/_content', name))).rejects.toThrow()
+  })
+
+  fixtureTest('refuses to copy a file from outside the project root', async ({ fixture }) => {
+    // Otherwise `../../../etc/x.png` publishes a file the author never meant to.
+    await fixture.write('contentmap.config.ts', cfg(RENDER))
+    await fixture.writeBytes('outside.png', PNG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n![x](../../outside.png)')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(doc).toContain('../../outside.png')
+    const emitted = await readdir(join(fixture.dir, 'public/_content')).catch(() => [])
+    expect(emitted.filter(n => n.startsWith('outside'))).toEqual([])
+  })
+
+  fixtureTest('ctx.asset() rejects an escaping path by name', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      cfg('async (doc, ctx) => ({ title: doc.title, x: await ctx.asset("../../outside.png") })')
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+    const result = await createBuilder({ root: fixture.dir }).build()
+    const d = result.diagnostics.find(x => x.code === 'CM_TRANSFORM')
+    expect(d?.file).toBe('a.md')
+    expect(d?.message).toMatch(/outside the project root/)
+  })
+
+  fixtureTest('reads a repeated reference once', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', cfg(RENDER))
+    await fixture.writeBytes('content/hero.png', PNG)
+    await fixture.write(
+      'content/a.md',
+      '---\ntitle: A\n---\n![a](hero.png)\n![b](hero.png)\n![c](hero.png)'
+    )
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    // all three resolve to the same content-addressed name
+    expect([...doc.matchAll(/hero-[0-9a-f]{8}\.png/g)]).toHaveLength(3)
+  })
+
+  fixtureTest('leaves a malformed percent-escape alone', async ({ fixture }) => {
+    await fixture.write('contentmap.config.ts', cfg(RENDER))
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n![x](bad%zz.png)')
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    expect(result.documents).toBe(1)
+  })
+
+  fixtureTest('derivations alone do not copy assets', async ({ fixture }) => {
+    // plain()/toc()/readingTime() contain no URLs, so rewriting during them
+    // would copy files for a document that never emits their links.
+    await fixture.write(
+      'contentmap.config.ts',
+      cfg('async (doc, ctx) => ({ title: doc.title, words: (await ctx.readingTime()).words })')
+    )
+    await fixture.writeBytes('content/hero.png', PNG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n![h](hero.png) some words here')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    const emitted = await readdir(join(fixture.dir, 'public/_content')).catch(() => [])
+    expect(emitted).toEqual([])
   })
 })

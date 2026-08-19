@@ -1,4 +1,4 @@
-import { dirname, extname, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   codeFrame,
   DiagnosticBag,
@@ -140,7 +140,11 @@ export class Builder {
 
     // One copy pass at the end: a file referenced by fifty documents is read,
     // hashed and written exactly once.
-    await this.#assets.flush(config.output.assets, config.dryRun)
+    await this.#assets.flush(
+      config.output.assets,
+      join(config.output.dir, '.cache', 'assets.json'),
+      config.dryRun
+    )
 
     await emitBarrel(config, stats)
     await emitTypes(config, stats)
@@ -414,7 +418,24 @@ export class Builder {
       // asset, failing, and taking the whole document with it.
       if (!config.assetExtensions.includes(ext)) return undefined
 
-      const sourcePath = resolve(dirname(from), decodeURI(rawPath))
+      // A malformed percent-escape is not an asset reference; leaving the URL
+      // alone beats failing the document over it.
+      let decoded: string
+      try {
+        decoded = decodeURI(rawPath)
+      } catch {
+        return undefined
+      }
+
+      const sourcePath = resolve(dirname(from), decoded)
+      // Content must not reach outside the project. `../../../etc/x.png` would
+      // otherwise copy a file the author never intended to publish into the
+      // public output directory.
+      const rel = relative(config.root, sourcePath)
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new OutsideRootError(url, sourcePath)
+      }
+
       return await this.#assets.register({
         sourcePath,
         template: config.output.assetsName,
@@ -457,6 +478,7 @@ export class Builder {
       rewrite: async html => {
         const result = await rewriteHtml(html, {
           resolve: async (url): Promise<ResolvedAsset | undefined> => {
+            try {
             const ext = extname(splitUrl(url).path).toLowerCase()
             if (isImageExtension(ext) && config.images) {
               const measured = await measure(url)
@@ -471,6 +493,15 @@ export class Builder {
             return registered
               ? { src: registered.src, sourcePath: registered.sourcePath }
               : undefined
+            } catch (error) {
+              if (error instanceof OutsideRootError) {
+                this.#logger.warn(
+                  `${documentMeta.filePath}: ignoring "${error.url}" — outside the project root`
+                )
+                return undefined
+              }
+              throw error
+            }
           }
         })
         return result.html
@@ -672,6 +703,18 @@ function reportUnknownFields(
 function hintForUnknown(key: string, declared: readonly string[]): { hint?: string } {
   const guess = suggest(key, declared)
   return guess ? { hint: `Did you mean "${guess}"?` } : {}
+}
+
+/** A relative reference that escapes the project root. */
+class OutsideRootError extends Error {
+  override readonly name = 'OutsideRootError'
+  readonly url: string
+  readonly hint: string
+  constructor(url: string, resolved: string) {
+    super(`"${url}" resolves outside the project root (${resolved})`)
+    this.url = url
+    this.hint = 'Assets must live inside the project. Move the file, or set `root` in your config.'
+  }
 }
 
 function describeValue(value: unknown): string {

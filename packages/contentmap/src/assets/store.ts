@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { digest as hashOf } from '../utils/digest.ts'
 import { withFdRetry } from '../utils/fd.ts'
@@ -51,6 +51,9 @@ export class AssetStore {
    */
   #known = new Map<string, Entry>()
 
+  /** sourcePath -> in-flight or completed read, so N references cost one read. */
+  #reads = new Map<string, Promise<{ buffer: Uint8Array; digest: string; mtimeMs: number }>>()
+
   async register(options: {
     sourcePath: string
     template: string
@@ -59,19 +62,24 @@ export class AssetStore {
     ownerId: string
   }): Promise<RegisteredAsset> {
     const { sourcePath, template, base, suffix, ownerId } = options
-    const [buffer, info] = await Promise.all([
-      withFdRetry(() => readFile(sourcePath)),
-      stat(sourcePath)
-    ])
-    const digest = hashOf(buffer)
+
+    // A document that shows the same image five times should read and hash it
+    // once, not five times.
+    let read = this.#reads.get(sourcePath)
+    if (!read) {
+      read = (async () => {
+        const [buffer, info] = await Promise.all([
+          withFdRetry(() => readFile(sourcePath)),
+          stat(sourcePath)
+        ])
+        return { buffer, digest: hashOf(buffer), mtimeMs: info.mtimeMs }
+      })()
+      this.#reads.set(sourcePath, read)
+    }
+    const { buffer, digest, mtimeMs } = await read
     const name = expandTemplate(template, sourcePath, digest)
 
-    const entry: Entry = {
-      sourcePath,
-      digest,
-      size: buffer.byteLength,
-      mtimeMs: info.mtimeMs
-    }
+    const entry: Entry = { sourcePath, digest, size: buffer.byteLength, mtimeMs }
     this.#entries.set(name, entry)
     this.#known.set(name, entry)
     this.#buffers.set(name, buffer)
@@ -139,19 +147,32 @@ export class AssetStore {
     this.#entries.clear()
     this.#owners.clear()
     this.#buffers.clear()
+    this.#reads.clear()
   }
 
   /**
-   * Copy everything registered, then delete anything in the directory that no
-   * longer belongs.
+   * Copy everything registered, then remove assets we previously wrote that are
+   * no longer referenced.
    *
-   * Velite never removes assets from deleted content, so a long-lived project
-   * accumulates unreachable files in its public directory indefinitely.
+   * Cleanup is driven by a manifest of what WE emitted, never by listing the
+   * directory. The output directory is usually inside `public/`, which belongs
+   * to the user: deleting everything unrecognised there destroys favicons,
+   * robots.txt, and anything another tool put beside our files. Velite never
+   * cleans up at all, so a long-lived project accumulates unreachable assets —
+   * the fix for that must not be worse than the problem.
    */
-  async flush(outDir: string, dryRun = false): Promise<{ written: number; removed: number }> {
+  async flush(
+    outDir: string,
+    manifestPath: string,
+    dryRun = false
+  ): Promise<{ written: number; removed: number }> {
     if (dryRun) return { written: 0, removed: 0 }
+
+    const previous = await readManifest(manifestPath)
     if (this.#entries.size === 0) {
-      return { written: 0, removed: await this.#removeOrphans(outDir) }
+      const removed = await this.#removeUnreferenced(outDir, previous)
+      await writeManifest(manifestPath, [])
+      return { written: 0, removed }
     }
     await mkdir(outDir, { recursive: true })
 
@@ -171,18 +192,34 @@ export class AssetStore {
     })
 
     this.#buffers.clear()
-    return { written, removed: await this.#removeOrphans(outDir) }
+    const removed = await this.#removeUnreferenced(outDir, previous)
+    await writeManifest(manifestPath, names)
+    return { written, removed }
   }
 
-  async #removeOrphans(outDir: string): Promise<number> {
-    const present = await readdir(outDir).catch(() => [] as string[])
-    const stale = present.filter(name => !this.#entries.has(name))
+  /** Remove only names we recorded emitting and no longer need. */
+  async #removeUnreferenced(outDir: string, previous: readonly string[]): Promise<number> {
+    const stale = previous.filter(name => !this.#entries.has(name))
     if (stale.length === 0) return 0
     await mapLimit(stale, COPY_CONCURRENCY, async name => {
-      await rm(join(outDir, name), { force: true, recursive: true })
+      await rm(join(outDir, name), { force: true })
     })
     return stale.length
   }
+}
+
+async function readManifest(path: string): Promise<string[]> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
+    return Array.isArray(parsed) ? parsed.filter(n => typeof n === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+async function writeManifest(path: string, names: readonly string[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, JSON.stringify([...names].sort(), null, 0), 'utf8')
 }
 
 export interface AssetDependency {
