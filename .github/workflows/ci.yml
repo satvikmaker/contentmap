@@ -30,6 +30,37 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  # A build that cannot read its corpus must never report success. Under a low
+  # fd limit content-collections lost 2,758 of 3,000 documents and exited 0.
+  fd-limit:
+    name: silent-data-loss gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: ./scripts/fd-limit-gate.sh
+
+  bench:
+    name: performance gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/bench.mjs 10000
+      - run: node scripts/bundle-size.mjs
+
   publish-check:
     name: publint + are-the-types-wrong
     runs-on: ubuntu-latest
