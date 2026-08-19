@@ -1,0 +1,29 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+*.tsbuildinfo
+.turbo/
+
+# contentmap generated output
+.contentmap/
+
+# test / coverage
+coverage/
+.vitest/
+
+# env & editor
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
