@@ -5,6 +5,7 @@ import { idFromPath, isIdentifier, suggest } from '../src/utils/paths.ts'
 import { splitFrontmatter, parseFrontmatterBlock } from '../src/parsers/frontmatter.ts'
 import { serialize, SerializeError, moduleNameFor } from '../src/write/serialize.ts'
 import { dotPath } from '../src/validate/standard.ts'
+import { collection } from '../src/runtime/index.ts'
 
 describe('mapLimit', () => {
   it('preserves input order', async () => {
@@ -166,5 +167,70 @@ describe('dotPath', () => {
     expect(dotPath([])).toBeUndefined()
     expect(dotPath(undefined)).toBeUndefined()
     expect(dotPath([Symbol('x')])).toBeUndefined()
+  })
+})
+
+describe('runtime Query', () => {
+  const rows = [
+    { _meta: { id: 'a' }, title: 'Alpha', n: 2 },
+    { _meta: { id: 'b' }, title: 'Beta', n: 1 },
+    { _meta: { id: 'c' }, title: 'Gamma', n: 3 }
+  ]
+  const withModules = () =>
+    collection<Record<string, unknown>>(rows, {
+      a: async () => ({ default: { ...rows[0], body: 'A body' } })
+    })
+
+  it('narrows projections and keeps _meta for identity', () => {
+    const projected = withModules().select('title').all()[0]!
+    expect(Object.keys(projected).sort()).toEqual(['_meta', 'title'])
+  })
+
+  it('chains where/sortBy/limit/skip without mutating the source', () => {
+    const q = withModules()
+    expect(q.where({ n: 1 }).count()).toBe(1)
+    expect(q.sortBy('n').all().map(r => r['title'])).toEqual(['Beta', 'Alpha', 'Gamma'])
+    expect(q.sortBy('n', 'desc').first()?.['title']).toBe('Gamma')
+    expect(q.limit(2).count()).toBe(2)
+    expect(q.skip(2).ids()).toEqual(['c'])
+    // the original query is untouched
+    expect(q.count()).toBe(3)
+  })
+
+  it('sorts null and undefined last', () => {
+    const q = collection<Record<string, unknown>>(
+      [
+        { _meta: { id: 'a' }, n: 2 },
+        { _meta: { id: 'b' }, n: null },
+        { _meta: { id: 'c' }, n: 1 }
+      ],
+      {}
+    )
+    expect(q.sortBy('n').ids()).toEqual(['c', 'a', 'b'])
+  })
+
+  it('groups by a field', () => {
+    const groups = withModules().groupBy('n')
+    expect(groups.size).toBe(3)
+  })
+
+  it('loads via a module when one exists', async () => {
+    expect((await withModules().load('a'))['body']).toBe('A body')
+  })
+
+  // bundle output inlines documents and emits no modules
+  it('falls back to the inlined row when there is no module', async () => {
+    const bundled = collection<Record<string, unknown>>(rows, {})
+    expect((await bundled.load('b'))['title']).toBe('Beta')
+  })
+
+  it('throws a named error for an unknown id', async () => {
+    await expect(withModules().load('nope')).rejects.toThrow(/no document with id "nope"/)
+  })
+
+  it('survives projection before load', async () => {
+    const q = withModules().select('title')
+    expect(q.ids()).toEqual(['a', 'b', 'c'])
+    expect((await q.load('a'))['body']).toBe('A body')
   })
 })

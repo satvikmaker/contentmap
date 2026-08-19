@@ -28,14 +28,22 @@ type HeavyOf<C, K extends keyof Collections<C> & string> =
     ? H & string
     : 'content' | 'html' | 'mdx' | 'body' | 'raw'
 
+type IndexListOf<C, K extends keyof Collections<C> & string> =
+  Collections<C>[K] extends { index: readonly (infer I)[] } ? I & string : never
+
 /**
- * The index type: exactly the document minus heavy fields.
+ * The index type.
+ *
+ * When a collection declares an explicit `index` list, only those fields are
+ * carried — so the type must narrow to match, or it promises fields the runtime
+ * dropped. Otherwise it is the document minus heavy fields.
  *
  * Identity lives in `_meta.id`, not a synthetic top-level `id` — a synthetic
  * field would shadow a user's own `id` (authors commonly declare one) and would
  * not be a member of the document type, breaking `Query<T, K extends keyof T>`.
  */
-export type InferIndex<C, K extends keyof Collections<C> & string> = Omit<
-  InferDoc<C, K>,
-  HeavyOf<C, K>
->
+export type InferIndex<C, K extends keyof Collections<C> & string> = [
+  IndexListOf<C, K>
+] extends [never]
+  ? Omit<InferDoc<C, K>, HeavyOf<C, K>>
+  : Pick<InferDoc<C, K>, (IndexListOf<C, K> | '_meta') & keyof InferDoc<C, K>>

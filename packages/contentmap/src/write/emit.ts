@@ -18,14 +18,16 @@ export interface EmitStats {
    * to re-serialize and re-read the whole corpus, which is precisely why a
    * one-character edit costs content-collections ~2 seconds.
    */
+  /** `check` validates without producing artifacts. */
+  dryRun: boolean
   emitted: Map<string, string>
   sources: Map<string, string>
   /** Serialized index-row fragments, keyed by output path. */
   rows: Map<string, string>
 }
 
-export function createEmitStats(): EmitStats {
-  return { written: 0, skipped: 0, emitted: new Map(), sources: new Map(), rows: new Map() }
+export function createEmitStats(dryRun = false): EmitStats {
+  return { dryRun, written: 0, skipped: 0, emitted: new Map(), sources: new Map(), rows: new Map() }
 }
 
 /**
@@ -43,6 +45,10 @@ export async function emit(
   stats: EmitStats,
   present?: ReadonlySet<string>
 ): Promise<void> {
+  if (stats.dryRun) {
+    stats.skipped++
+    return
+  }
   const hash = digest(content)
   if (stats.emitted.get(path) === hash) {
     // We wrote exactly these bytes this session. Confirm the file is still
@@ -128,20 +134,40 @@ export async function emitCollection({
   stats
 }: EmitCollectionInput): Promise<void> {
   const dir = join(config.output.dir, collection.name)
-  await mkdir(dir, { recursive: true })
+  if (!stats.dryRun) await mkdir(dir, { recursive: true })
 
   // One readdir replaces one access() per document. On a 10k corpus that is a
-  // single syscall instead of ten thousand, and it still catches files deleted
-  // outside the process — which is the reason we verify at all.
-  const present = new Set<string>(await withFdRetry(() => readdir(dir)).catch(() => []))
+  // single syscall instead of ten thousand, it still catches files deleted
+  // outside the process, and it gives us the set needed to remove orphans.
+  const present = stats.dryRun
+    ? new Set<string>()
+    : new Set<string>(await withFdRetry(() => readdir(dir)).catch(() => []))
+
   const format = collection.format ?? config.output.format
   const emitModules = format === 'modules' || format === 'both'
+
+  // A singleton collapses to one document, so per-document modules and a
+  // queryable index would both be ceremony around a single object.
+  if (collection.single) {
+    const doc = entries[0]
+    const body = doc === undefined ? 'undefined' : serialize(splitFields(doc, collection).full)
+    const source =
+      `${BANNER}export const ${collection.name} = ${body}\n` +
+      `export default ${collection.name}\n`
+    await emit(join(dir, 'index.js'), source, stats)
+    await removeOrphans(dir, present, new Set(), stats)
+    return
+  }
+
   const indexRows: string[] = []
   const loaders: string[] = []
+  const expected = new Set<string>(['index.js'])
 
   const work = entries.map(entry => {
     const mod = moduleNameFor(entry.id)
-    const path = join(dir, `${mod}.js`)
+    const file = `${mod}.js`
+    const path = join(dir, file)
+    if (emitModules) expected.add(file)
     const fresh = stats.sources.get(path) !== entry.digest
 
     // Reuse the serialized index fragment when the source is unchanged. This is
@@ -151,12 +177,12 @@ export async function emitCollection({
     if (row === undefined) {
       const split = splitFields(entry, collection)
       full = split.full
-      row = serializeAt(split.index, 1)
+      row = serializeAt(emitModules ? split.index : split.full, 1)
       stats.rows.set(path, row)
     }
     indexRows.push(row)
     if (!emitModules) return undefined
-    loaders.push(`  ${JSON.stringify(entry.id)}: () => import('./${mod}.js')`)
+    loaders.push(`  ${JSON.stringify(entry.id)}: () => import('./${file}')`)
     return { entry, full, path }
   })
 
@@ -181,19 +207,47 @@ export async function emitCollection({
     })
   }
 
-  const parts = [BANNER]
-  if (emitModules) {
-    parts.push(`import { collection } from 'contentmap/runtime'\n\n`)
-    parts.push(`const index = [\n${indexRows.join(',\n')}\n]\n\n`)
-    parts.push(`const modules = {\n${loaders.join(',\n')}\n}\n\n`)
-    parts.push(`export const ${collection.name} = collection(index, modules)\n`)
-    parts.push(`export default ${collection.name}\n`)
-  } else {
-    const rows = entries.map(e => splitFields(e, collection).full)
-    parts.push(`export const ${collection.name} = ${serialize(rows)}\n`)
-    parts.push(`export default ${collection.name}\n`)
-  }
+  // `bundle` inlines whole documents instead of lazily importing them, but it
+  // exposes the SAME Query object. Handing back a bare array here — as the
+  // first cut did — would make the emitted `.d.ts` lie about the runtime shape
+  // the moment a collection opted into bundling.
+  const parts = [
+    BANNER,
+    `import { collection } from 'contentmap/runtime'\n\n`,
+    `const index = [\n${indexRows.join(',\n')}\n]\n\n`,
+    `const modules = {\n${loaders.join(',\n')}\n}\n\n`,
+    `export const ${collection.name} = collection(index, modules)\n`,
+    `export default ${collection.name}\n`
+  ]
   await emit(join(dir, 'index.js'), parts.join(''), stats)
+  await removeOrphans(dir, present, expected, stats)
+}
+
+/**
+ * Delete generated modules whose document no longer exists.
+ *
+ * Without this, renaming or deleting content leaves the old module on disk
+ * forever. It is unreferenced by the index so nothing breaks at runtime, but it
+ * bloats deploys and confuses anyone reading the output directory.
+ */
+async function removeOrphans(
+  dir: string,
+  present: ReadonlySet<string>,
+  expected: ReadonlySet<string>,
+  stats: EmitStats
+): Promise<void> {
+  if (stats.dryRun) return
+  const stale = [...present].filter(
+    name => name.endsWith('.js') && !expected.has(name) && name !== 'index.js'
+  )
+  if (stale.length === 0) return
+  await mapLimit(stale, WRITE_CONCURRENCY, async name => {
+    const path = join(dir, name)
+    await rm(path, { force: true })
+    stats.emitted.delete(path)
+    stats.sources.delete(path)
+    stats.rows.delete(path)
+  })
 }
 
 export async function emitBarrel(config: ResolvedConfig, stats: EmitStats): Promise<void> {
@@ -226,6 +280,11 @@ export async function emitTypes(config: ResolvedConfig, stats: EmitStats): Promi
   for (const [name, def] of Object.entries(config.collections)) {
     const type = def.typeName ?? name
     lines.push(`export type ${type} = InferDoc<typeof __config, ${JSON.stringify(name)}>\n`)
+    if (def.single) {
+      // A singleton is one document, not a queryable collection.
+      lines.push(`export declare const ${name}: ${type}\n\n`)
+      continue
+    }
     lines.push(
       `export type ${type}Index = InferIndex<typeof __config, ${JSON.stringify(name)}>\n`
     )

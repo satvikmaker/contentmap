@@ -87,12 +87,17 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
       case 'build':
         return await build(options, values)
       case 'check':
-        return await build({ ...options, outDir: undefined as unknown as string }, values, true)
+        return await build({ ...options, dryRun: true }, values, true)
       case 'clean':
         return await clean(options)
-      case 'dev':
-        process.stderr.write(`${yellow('!')} \`dev\` arrives in M7. Use \`contentmap build\`.\n`)
-        return 1
+      case 'dev': {
+        // Honest placeholder: watch mode is M7. Build once so the command is
+        // not simply a dead end, and say plainly what is missing.
+        process.stderr.write(
+          `${yellow('!')} watch mode arrives in M7 — building once instead.\n`
+        )
+        return await build(options, values)
+      }
       case 'init':
         process.stderr.write(`${yellow('!')} \`init\` arrives in M9.\n`)
         return 1

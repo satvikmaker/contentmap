@@ -50,7 +50,7 @@ export interface PreviousState {
  */
 export async function collectFiles(
   collection: CollectionDefinition,
-  _config: ResolvedConfig,
+  config: ResolvedConfig,
   previous?: ReadonlyMap<string, PreviousState>
 ): Promise<CollectResult> {
   const include = Array.isArray(collection.include)
@@ -78,7 +78,10 @@ export async function collectFiles(
   const failures: ReadFailure[] = []
   const unchanged: string[] = []
 
-  const results = await mapLimit(matches, READ_CONCURRENCY, async relative => {
+  // Reads are IO-bound and peak around 64 regardless of core count, so this is
+  // deliberately NOT `config.concurrency` (which governs CPU-bound work).
+  const readConcurrency = config.readConcurrency ?? READ_CONCURRENCY
+  const results = await mapLimit(matches, readConcurrency, async relative => {
     const absolutePath = join(collection.directory, relative)
     const relativePath = toPosix(relative)
     try {

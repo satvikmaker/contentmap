@@ -14,6 +14,9 @@ import {
 } from './write/emit.ts'
 import { mapLimit } from './utils/limit.ts'
 import { suggest } from './utils/paths.ts'
+/** Field the frontmatter parsers write the document body into. */
+const BODY_FIELD = 'content'
+
 import type {
   BuilderEvent,
   BuilderOptions,
@@ -21,6 +24,7 @@ import type {
   CollectionDefinition,
   Diagnostic,
   ResolvedConfig,
+  Severity,
   StoreEntry
 } from './types.ts'
 
@@ -42,7 +46,7 @@ export class Builder {
   #config: ResolvedConfig | undefined
   #previous = new Map<string, Map<string, PreviousState>>()
   #cache = new Map<string, StoreEntry[]>()
-  #emitStats: EmitStats = createEmitStats()
+  #emitStats: EmitStats | undefined
 
   constructor(options: BuilderOptions = {}) {
     this.#options = options
@@ -93,6 +97,7 @@ export class Builder {
 
     let documents = 0
     let cacheHits = 0
+    this.#emitStats ??= createEmitStats(config.dryRun)
     const stats: EmitStats = this.#emitStats
 
     for (const collection of Object.values(config.collections)) {
@@ -156,7 +161,6 @@ export class Builder {
     }
 
     const cached = this.#cache.get(collection.name) ?? []
-    const byId = new Map(cached.map(e => [e.id, e] as const))
     const cacheHits = collected.unchanged.length
 
     const parsedGroups = await this.#time('parse+validate', () =>
@@ -166,28 +170,82 @@ export class Builder {
     )
 
     const fresh = parsedGroups.flat()
-    const alive = new Set(
-      collected.unchanged.concat(collected.files.map(f => f.relativePath))
-    )
 
-    const entries: StoreEntry[] = []
-    for (const entry of cached) {
-      if (alive.has(entry.meta.filePath) && !fresh.some(f => f.id === entry.id)) {
-        entries.push(entry)
-      }
-    }
+    // Only files we did NOT re-read may reuse a cached entry. Keying on every
+    // path we saw would resurrect stale data whenever an edited file stopped
+    // validating — the document would vanish from `fresh`, and its previous
+    // version would silently survive into the output.
+    const reusable = new Set(collected.unchanged)
+    const entries: StoreEntry[] = cached.filter(e => reusable.has(e.meta.filePath))
     entries.push(...fresh)
-    entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-    this.#cache.set(collection.name, entries)
+    // ── duplicate identity ──────────────────────────────────────────────────
+    // `a/index.md` and `a.md` both resolve to the id `a`. Emitting both would
+    // have one module silently overwrite the other and leave a duplicate key in
+    // the loader map — data loss reported as success.
+    const seen = new Map<string, string>()
+    const unique: StoreEntry[] = []
+    for (const entry of entries) {
+      const first = seen.get(entry.id)
+      if (first !== undefined) {
+        diagnostics.add({
+          code: 'CM_DUPLICATE_ID',
+          severity: 'error',
+          message: `Duplicate document id "${entry.id}"`,
+          file: entry.meta.filePath,
+          collection: collection.name,
+          documentId: entry.id,
+          hint: `Already produced by "${first}". Rename one, or narrow the collection's \`include\`.`
+        })
+        continue
+      }
+      seen.set(entry.id, entry.meta.filePath)
+      unique.push(entry)
+    }
+
+    // Stable by id so output is byte-reproducible, then the user's sort.
+    unique.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    if (collection.sort) {
+      const docs = unique.map(e => ({ ...e.data, _meta: e.meta }))
+      const order = unique.map((_, i) => i)
+      const compare = collection.sort
+      order.sort((x, y) => compare(docs[x]!, docs[y]!))
+      unique.splice(0, unique.length, ...order.map(i => unique[i]!))
+    }
+
+    if (collection.single && unique.length !== 1) {
+      diagnostics.add({
+        code: 'CM_SINGLETON',
+        severity: 'error',
+        message: `Collection "${collection.name}" is \`single\` but matched ${unique.length} documents`,
+        collection: collection.name,
+        hint:
+          unique.length === 0
+            ? `No file matched ${String(collection.include)} in ${collection.directory}.`
+            : `Matched: ${unique.map(e => e.meta.filePath).join(', ')}`
+      })
+    }
+
+    const finalEntries = unique
+    this.#cache.set(collection.name, finalEntries)
     this.#previous.set(
       collection.name,
       new Map(
-        entries.map(e => [e.meta.filePath, { mtimeMs: e.mtimeMs, digest: e.digest }] as const)
+        finalEntries.map(
+          e => [e.meta.filePath, { mtimeMs: e.mtimeMs, digest: e.digest }] as const
+        )
       )
     )
-    void byId
-    return { entries, cacheHits }
+    return { entries: finalEntries, cacheHits }
+  }
+
+  #reportUnknownFields(
+    raw: Record<string, unknown>,
+    validated: Record<string, unknown>,
+    injectedBody: string | undefined,
+    ctx: UnknownFieldContext
+  ): void {
+    reportUnknownFields(raw, validated, injectedBody, ctx)
   }
 
   async #processFile(
@@ -235,29 +293,47 @@ export class Builder {
       const many = records.length > 1
       const id = many ? `${meta.id}[${i}]` : meta.id
       const raw: Record<string, unknown> = { ...record.data }
-      if (parser.hasBody && record.body !== undefined && !('content' in raw)) {
-        raw['content'] = record.body
+      // Remember whether WE injected the body, so it is never reported as an
+      // unknown field for a schema that simply does not want it.
+      let injectedBody: string | undefined
+      if (parser.hasBody && record.body !== undefined && !(BODY_FIELD in raw)) {
+        raw[BODY_FIELD] = record.body
+        injectedBody = BODY_FIELD
       }
 
+      const policy = config.onValidationError
       const result = await validate(collection.schema, raw)
+
       if (!result.ok) {
-        const known = Object.keys(raw)
-        for (const issue of result.issues) {
-          diagnostics.add({
-            code: 'CM_VALIDATION',
-            severity: config.onValidationError === 'warn' ? 'warning' : 'error',
-            message: issue.message,
-            file: file.relativePath,
-            ...(issue.path === undefined ? {} : { field: issue.path }),
-            collection: collection.name,
-            documentId: id,
-            ...hintFor(issue.path, known)
-          })
+        if (policy !== 'ignore') {
+          const known = Object.keys(raw)
+          for (const issue of result.issues) {
+            diagnostics.add({
+              code: 'CM_VALIDATION',
+              // fail => error (build stops). warn/skip => warning (build
+              // continues); they differ only in whether the document survives.
+              severity: policy === 'fail' ? 'error' : 'warning',
+              message: issue.message,
+              file: file.relativePath,
+              ...(issue.path === undefined ? {} : { field: issue.path }),
+              collection: collection.name,
+              documentId: id,
+              ...hintFor(issue.path, known)
+            })
+          }
         }
-        // 'warn' keeps the document; 'fail' and 'skip' both drop it. Emitting a
-        // record that violates its own declared type — velite's default — makes
-        // the generated .d.ts a lie.
-        if (config.onValidationError !== 'warn') continue
+        // Only 'warn' keeps the invalid document. Emitting a record that
+        // violates its own declared type — velite's default — makes the
+        // generated .d.ts a lie.
+        if (policy !== 'warn') continue
+      } else {
+        this.#reportUnknownFields(raw, result.value, injectedBody, {
+          file: file.relativePath,
+          collection: collection.name,
+          documentId: id,
+          policy: config.onUnknownField,
+          diagnostics
+        })
       }
 
       // The body already lives in `data` (under the parser's body field), so
@@ -273,6 +349,54 @@ export class Builder {
     }
     return out
   }
+}
+
+interface UnknownFieldContext {
+  file: string
+  collection: string
+  documentId: string
+  policy: Severity
+  diagnostics: DiagnosticBag
+}
+
+/**
+ * Report frontmatter keys the schema discarded.
+ *
+ * Most validators strip unknown keys silently, so `catgeory: news` simply
+ * vanishes and the author never learns their typo did nothing. Comparing the
+ * parsed input against the validated output recovers that signal without
+ * requiring a strict schema.
+ */
+function reportUnknownFields(
+  raw: Record<string, unknown>,
+  validated: Record<string, unknown>,
+  injectedBody: string | undefined,
+  ctx: UnknownFieldContext
+): void {
+  if (ctx.policy === 'ignore') return
+  // A passthrough or non-object result carries no reliable signal.
+  if (validated === null || typeof validated !== 'object') return
+
+  const declared = Object.keys(validated)
+  for (const key of Object.keys(raw)) {
+    if (key === injectedBody) continue
+    if (key in validated) continue
+    ctx.diagnostics.add({
+      code: 'CM_UNKNOWN_FIELD',
+      severity: ctx.policy === 'fail' ? 'error' : 'warning',
+      message: `"${key}" is not in the schema and was discarded`,
+      file: ctx.file,
+      field: key,
+      collection: ctx.collection,
+      documentId: ctx.documentId,
+      ...hintForUnknown(key, declared)
+    })
+  }
+}
+
+function hintForUnknown(key: string, declared: readonly string[]): { hint?: string } {
+  const guess = suggest(key, declared)
+  return guess ? { hint: `Did you mean "${guess}"?` } : {}
 }
 
 function hintFor(field: string | undefined, known: readonly string[]): { hint?: string } {

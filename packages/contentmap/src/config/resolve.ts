@@ -88,9 +88,17 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     clean: options.clean ?? out.clean ?? false
   }
 
+  if (out.types === 'explicit') {
+    throw new ConfigError(
+      "output.types: 'explicit' is not implemented yet",
+      "Use 'trampoline' (the default) or false. Explicit structural .d.ts emission is planned; see docs/ROADMAP.md."
+    )
+  }
+
   const collections = validateCollections(user.collections, base)
 
   return {
+    dryRun: options.dryRun ?? false,
     root: base,
     configPath,
     configDeps: loaded.deps,
@@ -99,6 +107,7 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     output,
     parsers: user.parsers ?? [],
     concurrency: options.concurrency ?? user.concurrency ?? availableParallelism(),
+    readConcurrency: user.readConcurrency ?? 64,
     onValidationError: options.onValidationError ?? user.onValidationError ?? 'fail',
     onUnknownField: user.onUnknownField ?? 'warn'
   }
@@ -118,6 +127,7 @@ function validateCollections(
 ): Record<string, CollectionDefinition> {
   const out: Record<string, CollectionDefinition> = {}
   const typeNames = new Map<string, string>()
+  const names = new Map<string, string>()
 
   for (const [key, def] of Object.entries(input)) {
     if (!def || typeof def !== 'object') {
@@ -130,6 +140,20 @@ function validateCollections(
         'Collection names become export names, so they must match /^[A-Za-z_$][A-Za-z0-9_$]*$/.'
       )
     }
+    if (RESERVED.has(name)) {
+      throw new ConfigError(
+        `Collection name "${name}" is reserved`,
+        'It becomes an export name in the generated module, which would not parse.'
+      )
+    }
+    const duplicate = names.get(name)
+    if (duplicate !== undefined) {
+      throw new ConfigError(
+        `Two collections are both named "${name}" (config keys "${duplicate}" and "${key}")`,
+        'Collection names become export names, so they must be unique.'
+      )
+    }
+    names.set(name, key)
     if (!def.directory) {
       throw new ConfigError(`Collection "${name}" is missing \`directory\``)
     }
@@ -153,12 +177,23 @@ function validateCollections(
     }
     typeNames.set(typeName, name)
 
+    const heavy = def.heavy ?? DEFAULT_HEAVY
+    if (def.index) {
+      const conflict = def.index.filter(f => heavy.includes(f))
+      if (conflict.length > 0) {
+        throw new ConfigError(
+          `Collection "${name}" lists ${conflict.map(c => `"${c}"`).join(', ')} in both \`index\` and \`heavy\``,
+          'A heavy field is never carried in the index, so listing it there has no effect.'
+        )
+      }
+    }
+
     out[name] = {
       ...def,
       name,
       typeName,
       directory: resolve(base, def.directory),
-      heavy: def.heavy ?? DEFAULT_HEAVY
+      heavy
     }
   }
 
@@ -167,6 +202,30 @@ function validateCollections(
   }
   return out
 }
+
+/**
+ * Words that are valid identifiers by regex but cannot be used as export
+ * names, or would shadow something in the generated module.
+ */
+const RESERVED = new Set([
+  'default',
+  'import',
+  'export',
+  'const',
+  'let',
+  'var',
+  'function',
+  'class',
+  'return',
+  'new',
+  'typeof',
+  'void',
+  'null',
+  'true',
+  'false',
+  'await',
+  'collection'
+])
 
 /** `posts` -> `Post`, `authors` -> `Author`, `news` -> `News`. */
 function pascalSingular(name: string): string {

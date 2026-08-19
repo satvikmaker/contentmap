@@ -58,10 +58,21 @@ export interface CollectionDefinition<TSchema extends StandardSchemaV1 = Standar
   typeName?: string
   /** Fields carried in the eager index. Defaults to all non-heavy fields. */
   index?: readonly string[]
-  /** Fields never carried in the index. Defaults to html/mdx/body/raw. */
+  /** Fields never carried in the index. Defaults to content/html/mdx/body/raw. */
   heavy?: readonly string[]
+  /**
+   * Applied after the default id sort, before emission.
+   *
+   * content-collections refuses to provide this (issue #169, closed as
+   * documentation), so every consumer re-sorts at runtime. Sorting once at
+   * build time is free and removes universal boilerplate.
+   */
+  sort?: (a: AnyDocument, b: AnyDocument) => number
   format?: EmitFormat
 }
+
+/** A document as a `sort` comparator sees it: schema output plus `_meta`. */
+export type AnyDocument = Record<string, unknown> & { _meta: DocumentMeta }
 
 export type EmitFormat = 'modules' | 'bundle' | 'both'
 
@@ -81,6 +92,8 @@ export interface UserConfig {
   output?: OutputOptions
   parsers?: readonly Parser[]
   concurrency?: number
+  /** Parallel file reads. Defaults to 64, the measured optimum. */
+  readConcurrency?: number
   onValidationError?: Severity
   onUnknownField?: Severity
 }
@@ -96,6 +109,7 @@ export interface ResolvedOutput {
 }
 
 export interface ResolvedConfig {
+  dryRun: boolean
   root: string
   configPath: string
   /** Files whose change should reload the config. */
@@ -106,6 +120,7 @@ export interface ResolvedConfig {
   output: ResolvedOutput
   parsers: readonly Parser[]
   concurrency: number
+  readConcurrency: number
   onValidationError: Severity
   onUnknownField: Severity
 }
@@ -138,6 +153,8 @@ export interface BuilderOptions {
   format?: EmitFormat
   clean?: boolean
   onValidationError?: Severity
+  /** Validate only — collect, parse and check, but write nothing. Powers `check`. */
+  dryRun?: boolean
 }
 
 export type BuilderEvent =

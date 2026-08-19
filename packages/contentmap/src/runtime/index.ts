@@ -121,8 +121,13 @@ function make<T, K extends keyof T>(state: State<T>): Query<T, K> {
     },
     async load(id) {
       const loader = state.modules[id]
-      if (!loader) throw new Error(`contentmap: no document with id "${id}"`)
-      return (await loader()).default
+      if (loader) return (await loader()).default
+      // `bundle` output inlines whole documents into the index instead of
+      // emitting a module per document, so resolve from there. Keeping one
+      // Query surface across both formats is why this fallback exists.
+      const row = state.index.find(r => idOf(r) === id)
+      if (row) return row as T
+      throw new Error(`contentmap: no document with id "${id}"`)
     },
     async loadAll() {
       return Promise.all(state.rows.map(row => q.load(idOf(row))))
