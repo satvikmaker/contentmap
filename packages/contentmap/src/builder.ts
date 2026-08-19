@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   codeFrame,
@@ -28,11 +29,45 @@ import {
 } from './write/emit.ts'
 import { mapLimit } from './utils/limit.ts'
 import { cacheKey } from './utils/digest.ts'
+import { TransformCache } from './cache/index.ts'
 import { suggest } from './utils/paths.ts'
 /** Field the frontmatter parsers write the document body into. */
 const BODY_FIELD = 'content'
 
+interface CollectionResult {
+  entries: StoreEntry[]
+  cacheHits: number
+}
+
+/** Two collections whose transforms demand each other. */
+export class ReferenceCycleError extends Error {
+  override readonly name = 'ReferenceCycleError'
+  readonly hint: string
+  readonly chain: readonly string[]
+  constructor(chain: readonly string[]) {
+    super(`Reference cycle between collections: ${chain.join(' -> ')}`)
+    this.chain = chain
+    this.hint =
+      'One of these transforms must stop reading the other. Use `reference()` to keep an id instead of embedding the document.'
+  }
+}
+
+export class UnknownCollectionError extends Error {
+  override readonly name = 'UnknownCollectionError'
+  readonly hint: string
+  constructor(name: string, known: readonly string[]) {
+    super(`Unknown collection "${name}"`)
+    const guess = suggest(name, known)
+    this.hint = guess
+      ? `Did you mean "${guess}"?`
+      : `Known collections: ${known.join(', ') || '(none)'}`
+  }
+}
+
+import type { ContextServices } from './render/context.ts'
 import type {
+  AnyDocument,
+  CollectionRef,
   BuilderEvent,
   BuilderOptions,
   BuildResult,
@@ -66,7 +101,15 @@ export class Builder {
   #cache = new Map<string, StoreEntry[]>()
   #emitStats: EmitStats | undefined
   #assets = new AssetStore()
+  #transformCache: TransformCache | undefined
+  /** Collections finished this build. */
+  #built = new Map<string, CollectionResult>()
+  /** Collections currently building, so concurrent demands share one build. */
+  #inFlight = new Map<string, Promise<CollectionResult>>()
   #scanned = 0
+  /** Per-document reference and watch records, harvested after each transform. */
+  #refsFor = new Map<string, { collection: string; id: string; digest: string }[]>()
+  #watchFor = new Map<string, string[]>()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
     warn: message => this.#emit({ type: 'log', level: 'warn', message }),
@@ -115,10 +158,18 @@ export class Builder {
     for (const k of Object.keys(this.phases)) delete this.phases[k]
     this.#scanned = 0
     this.#assets.reset()
+    this.#built.clear()
+    this.#inFlight.clear()
     this.#emit({ type: 'build:start' })
 
     const config = this.#config ?? (await this.resolve())
     const diagnostics = new DiagnosticBag()
+
+    this.#transformCache ??= new TransformCache(
+      join(config.output.dir, '.cache', 'transforms'),
+      config.configDigest
+    )
+    this.#transformCache.reset()
 
     if (config.output.clean) await cleanOutput(config)
 
@@ -127,10 +178,19 @@ export class Builder {
     this.#emitStats ??= createEmitStats(config.dryRun)
     const stats: EmitStats = this.#emitStats
 
-    for (const collection of Object.values(config.collections)) {
-      const result = await this.#time('collect+validate', () =>
-        this.#buildCollection(collection, config, diagnostics)
-      )
+    // Build every collection, resolving cross-collection references on demand.
+    // Declaration order is irrelevant: a transform asking for another
+    // collection triggers that collection's build, so the effective order is
+    // topological. content-collections instead mutates a shared array inside a
+    // sequential loop, which is why reordering their config silently changes
+    // what `documents()` returns (their issue #396).
+    for (const name of Object.keys(config.collections)) {
+      await this.#ensureBuilt(name, config, diagnostics, [])
+    }
+
+    for (const [name, collection] of Object.entries(config.collections)) {
+      const result = this.#built.get(name)
+      if (!result) continue
       documents += result.entries.length
       cacheHits += result.cacheHits
       await this.#time('emit', () =>
@@ -145,6 +205,8 @@ export class Builder {
       join(config.output.dir, '.cache', 'assets.json'),
       config.dryRun
     )
+
+    await this.#transformCache?.flush(config.dryRun)
 
     await emitBarrel(config, stats)
     await emitTypes(config, stats)
@@ -165,11 +227,52 @@ export class Builder {
     return result
   }
 
+  /**
+   * Build a collection, or await the build already in progress.
+   *
+   * `stack` is the chain of collections that demanded this one. Finding the
+   * name already in that chain is a cycle; finding it merely in flight means a
+   * sibling document asked first, and we simply wait.
+   */
+  async #ensureBuilt(
+    name: string,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<CollectionResult> {
+    const done = this.#built.get(name)
+    if (done) return done
+
+    const position = stack.indexOf(name)
+    if (position !== -1) {
+      throw new ReferenceCycleError([...stack.slice(position), name])
+    }
+
+    const inFlight = this.#inFlight.get(name)
+    if (inFlight) return await inFlight
+
+    const collection = config.collections[name]
+    if (!collection) throw new UnknownCollectionError(name, Object.keys(config.collections))
+
+    const promise = this.#time('collect+validate', () =>
+      this.#buildCollection(collection, config, diagnostics, [...stack, name])
+    )
+    this.#inFlight.set(name, promise)
+    try {
+      const result = await promise
+      this.#built.set(name, result)
+      return result
+    } finally {
+      this.#inFlight.delete(name)
+    }
+  }
+
   async #buildCollection(
     collection: CollectionDefinition,
     config: ResolvedConfig,
-    diagnostics: DiagnosticBag
-  ): Promise<{ entries: StoreEntry[]; cacheHits: number }> {
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<CollectionResult> {
     const cachedEntries = this.#cache.get(collection.name) ?? []
 
     // A document whose IMAGE changed is stale even though its own file did not.
@@ -177,7 +280,10 @@ export class Builder {
     // serving fingerprinted URLs for bytes that no longer exist.
     const previous = await this.#dropAssetStale(
       this.#previous.get(collection.name),
-      cachedEntries
+      cachedEntries,
+      config,
+      diagnostics,
+      stack
     )
     const collected = await this.#time('read', () => collectFiles(collection, config, previous))
 
@@ -210,7 +316,7 @@ export class Builder {
 
     const parsedGroups = await this.#time('parse+validate', () =>
       mapLimit(collected.files, config.concurrency, async file =>
-        this.#processFile(file, collection, config, diagnostics)
+        this.#processFile(file, collection, config, diagnostics, stack)
       )
     )
 
@@ -224,11 +330,15 @@ export class Builder {
     const entries: StoreEntry[] = cached.filter(e => reusable.has(e.meta.filePath))
 
     // Reused documents never re-register their assets, so readopt them or the
-    // copier will delete files the emitted HTML still points at.
+    // copier will delete files the emitted HTML still points at. The same holds
+    // for their transform-cache entries: a document that was not reprocessed
+    // never calls ctx.cache(), so without this its entries look unused and get
+    // recomputed on the next build.
     for (const entry of entries) {
       if (entry.assets?.length) {
-        this.#assets.adopt(`${collection.name}\u0000${entry.id}`, entry.assets)
+        this.#assets.adopt(refKey(collection.name, entry.id), entry.assets)
       }
+      await this.#transformCache?.retain(collection.name, entry.id)
     }
     entries.push(...fresh)
 
@@ -316,7 +426,8 @@ export class Builder {
     documentMeta: DocumentMeta,
     file: { relativePath: string; absolutePath: string; content: string },
     body: string,
-    diagnostics: DiagnosticBag
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
   ): Promise<Record<string, unknown> | undefined> {
     const assets = this.#assetContext(collection, documentMeta, file.absolutePath)
     const ctx = createTransformContext({
@@ -327,7 +438,8 @@ export class Builder {
       path: file.absolutePath,
       renderer: this.#config?.renderer,
       logger: this.#logger,
-      ...assets
+      ...assets,
+      services: this.#services(collection, documentMeta, diagnostics, stack)
     })
 
     try {
@@ -345,6 +457,10 @@ export class Builder {
       }
       return produced as Record<string, unknown>
     } catch (error) {
+      // A cycle is a configuration problem, not a problem with one document.
+      // Reporting it per-file would print the same structural error against
+      // every document in both collections.
+      if (error instanceof ReferenceCycleError) throw error
       if (isSkipSignal(error)) {
         diagnostics.add({
           code: 'CM_SKIPPED',
@@ -376,20 +492,144 @@ export class Builder {
    */
   async #dropAssetStale(
     previous: Map<string, PreviousState> | undefined,
-    cached: readonly StoreEntry[]
+    cached: readonly StoreEntry[],
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
   ): Promise<Map<string, PreviousState> | undefined> {
     if (!previous) return previous
-    const withAssets = cached.filter(e => e.assetDeps?.length)
-    if (withAssets.length === 0) return previous
-
     let next: Map<string, PreviousState> | undefined
-    for (const entry of withAssets) {
-      if (await this.#assets.changed(entry.assetDeps!)) {
+
+    for (const entry of cached) {
+      let stale = false
+      if (entry.assetDeps?.length) stale = await this.#assets.changed(entry.assetDeps)
+      if (!stale && entry.refDeps?.length) {
+        stale = await this.#referencesChanged(entry.refDeps, config, diagnostics, stack)
+      }
+      if (stale) {
         next ??= new Map(previous)
         next.delete(entry.meta.filePath)
       }
     }
     return next ?? previous
+  }
+
+  /**
+   * Has a document this one embedded changed?
+   *
+   * Editing an author has to refresh every post that embedded them. Contentlayer
+   * carries the opposite behaviour as a known gap — `// TODO take care of case
+   * where embedded document was updated in the meantime`.
+   */
+  async #referencesChanged(
+    refs: readonly { collection: string; id: string; digest: string }[],
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<boolean> {
+    for (const ref of refs) {
+      // A collection that no longer exists means the reference is gone too.
+      if (!config.collections[ref.collection]) return true
+      if (stack.includes(ref.collection)) continue
+      const target = await this.#ensureBuilt(ref.collection, config, diagnostics, stack)
+      if (ref.id === '*') {
+        if (cacheKey(...target.entries.map(e => e.emitKey)) !== ref.digest) return true
+        continue
+      }
+      const found = target.entries.find(e => e.id === ref.id)
+      if (!found || found.emitKey !== ref.digest) return true
+    }
+    return false
+  }
+
+  /**
+   * Relations, caching and file emission for one document.
+   */
+  #services(
+    collection: CollectionDefinition,
+    documentMeta: DocumentMeta,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): ContextServices {
+    const config = this.#config!
+    const refs: { collection: string; id: string; digest: string }[] = []
+    const watchFiles: string[] = []
+    this.#refsFor.set(refKey(collection.name, documentMeta.id), refs)
+    this.#watchFor.set(refKey(collection.name, documentMeta.id), watchFiles)
+
+    const targetOf = async (ref: CollectionRef): Promise<{ name: string; result: CollectionResult }> => {
+      const name =
+        typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+      if (!name || !config.collections[name]) {
+        throw new UnknownCollectionError(String(name), Object.keys(config.collections))
+      }
+      return { name, result: await this.#ensureBuilt(name, config, diagnostics, stack) }
+    }
+
+    const lookup = async (ref: CollectionRef, id: string): Promise<StoreEntry> => {
+      const { name, result } = await targetOf(ref)
+      const found = result.entries.find(e => e.id === id)
+      if (!found) {
+        // Existence is checked for scalars AND lists. Contentlayer validates
+        // only the scalar case and ships `// TODO also check for references in
+        // lists`, so a broken list reference passes silently.
+        throw new MissingReferenceError(name, id, result.entries.map(e => e.id))
+      }
+      refs.push({ collection: name, id, digest: found.emitKey })
+      return found
+    }
+
+    return {
+      documents: async ref => {
+        const { name, result } = await targetOf(ref)
+        // Depend on the whole collection, so adding or removing a document in
+        // it invalidates this one.
+        refs.push({
+          collection: name,
+          id: '*',
+          digest: cacheKey(...result.entries.map(e => e.emitKey))
+        })
+        return result.entries.map(toDocument)
+      },
+      resolve: async (ref, id) => toDocument(await lookup(ref, id)),
+      resolveMany: async (ref, ids) => {
+        const settled = await Promise.allSettled(ids.map(id => lookup(ref, id)))
+        const missing = settled
+          .map((r, i) => (r.status === 'rejected' ? ids[i] : undefined))
+          .filter((v): v is string => v !== undefined)
+        // Report every missing id, not just the first: fixing them one build at
+        // a time is miserable on a large corpus.
+        if (missing.length > 0) {
+          const first = settled.find(r => r.status === 'rejected') as PromiseRejectedResult
+          const err = first.reason as MissingReferenceError
+          throw new MissingReferenceError(err.collection, missing.join('", "'), err.known)
+        }
+        return settled.map(r => toDocument((r as PromiseFulfilledResult<StoreEntry>).value))
+      },
+      reference: async (ref, id) => {
+        await lookup(ref, id)
+        return id
+      },
+      cache: (input, fn, options) =>
+        this.#transformCache!.through(
+          collection.name,
+          documentMeta.id,
+          input,
+          fn,
+          options?.key
+        ),
+      emitFile: async (name, content) => {
+        const target = join(config.output.dir, 'files', name)
+        if (!config.dryRun) {
+          await mkdir(dirname(target), { recursive: true })
+          await writeFile(target, content)
+        }
+        return target
+      },
+      addWatchFile: path => {
+        watchFiles.push(resolve(dirname(from(documentMeta, config)), path))
+      }
+    }
   }
 
   /**
@@ -513,7 +753,8 @@ export class Builder {
     file: SourceFile,
     collection: CollectionDefinition,
     config: ResolvedConfig,
-    diagnostics: DiagnosticBag
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
   ): Promise<StoreEntry[]> {
     const parser = resolveParser(
       file.extension || extname(file.relativePath),
@@ -624,7 +865,8 @@ export class Builder {
           documentMeta,
           file,
           record.body ?? '',
-          diagnostics
+          diagnostics,
+          stack
         )
         if (transformed === undefined) continue
         data = transformed
@@ -632,21 +874,31 @@ export class Builder {
 
       // The body already lives in `data` (under the parser's body field), so
       // keeping a second copy on the entry doubled resident memory for no gain.
-      const ownerId = `${collection.name}\u0000${id}`
+      const ownerId = refKey(collection.name, id)
       const owned = this.#assets.ownedBy(ownerId)
       const assetDeps = owned.length === 0 ? undefined : this.#assets.dependencies(ownerId)
+      const refDeps = dedupeRefs(this.#refsFor.get(ownerId))
+      const watchFiles = this.#watchFor.get(ownerId)
+      this.#refsFor.delete(ownerId)
+      this.#watchFor.delete(ownerId)
+
       out.push({
         id,
         collection: collection.name,
         digest: file.digest,
-        emitKey:
-          assetDeps === undefined
-            ? file.digest
-            : cacheKey(file.digest, ...assetDeps.map(d => d.digest)),
+        // Output depends on the source file, every asset it references, and
+        // every document it embedded.
+        emitKey: cacheKey(
+          file.digest,
+          ...(assetDeps ?? []).map(d => d.digest),
+          ...(refDeps ?? []).map(r => `${r.collection}/${r.id}@${r.digest}`)
+        ),
         data,
         meta: documentMeta,
         mtimeMs: file.mtimeMs,
-        ...(assetDeps === undefined ? {} : { assets: owned, assetDeps })
+        ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
+        ...(refDeps === undefined ? {} : { refDeps }),
+        ...(watchFiles === undefined || watchFiles.length === 0 ? {} : { watchFiles })
       })
     }
     return out
@@ -715,6 +967,49 @@ class OutsideRootError extends Error {
     this.url = url
     this.hint = 'Assets must live inside the project. Move the file, or set `root` in your config.'
   }
+}
+
+export class MissingReferenceError extends Error {
+  override readonly name = 'MissingReferenceError'
+  readonly collection: string
+  readonly known: readonly string[]
+  readonly hint: string
+  constructor(collection: string, id: string, known: readonly string[]) {
+    super(`"${id}" not found in collection "${collection}"`)
+    this.collection = collection
+    this.known = known
+    const guess = suggest(id.split('", "')[0] ?? id, known)
+    this.hint = guess ? `Did you mean "${guess}"?` : `${known.length} document(s) in that collection.`
+  }
+}
+
+const refKey = (collection: string, id: string): string => `${collection}\u0000${id}`
+
+function dedupeRefs(
+  refs: readonly { collection: string; id: string; digest: string }[] | undefined
+): { collection: string; id: string; digest: string }[] | undefined {
+  if (!refs || refs.length === 0) return undefined
+  const seen = new Map<string, { collection: string; id: string; digest: string }>()
+  for (const ref of refs) seen.set(`${ref.collection}\u0000${ref.id}`, ref)
+  return [...seen.values()].sort(
+    (a, b) => a.collection.localeCompare(b.collection) || a.id.localeCompare(b.id)
+  )
+}
+
+/**
+ * A store entry as a transform sees it.
+ *
+ * `digest` is stripped for the same reason the emitter strips it: it is a
+ * build-internal value, and an embedded document is written to disk just like
+ * any other, so leaking it here puts it right back in the output.
+ */
+function toDocument(entry: StoreEntry): AnyDocument {
+  const { digest: _digest, ...meta } = entry.meta
+  return { ...entry.data, _meta: meta as DocumentMeta }
+}
+
+function from(meta: DocumentMeta, config: ResolvedConfig): string {
+  return resolve(config.root, meta.filePath)
 }
 
 function describeValue(value: unknown): string {

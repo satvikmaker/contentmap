@@ -194,8 +194,45 @@ export interface TransformContext {
   readingTime(options?: ReadingTimeOptions): Promise<ReadingTime>
   /** Drop this document. Reported, not an error. */
   skip(reason?: string): never
+
+  // — relations —
+  /**
+   * Every document in another collection, fully transformed.
+   *
+   * Always transformed. content-collections mutates its collection array inside
+   * a sequential loop, so this returns transformed documents when the target
+   * appears earlier in the config and untransformed ones when it appears later:
+   * reordering an array silently changes your data (their issue #396, open
+   * since Nov 2024). Here the target is built on demand, so order is irrelevant.
+   */
+  documents<T = AnyDocument>(collection: CollectionRef): Promise<T[]>
+  /** Embed one document. Missing ids fail the build, naming the file. */
+  resolve<T = AnyDocument>(collection: CollectionRef, id: string): Promise<T>
+  /** Embed several. Every missing id is reported, not just the first. */
+  resolveMany<T = AnyDocument>(collection: CollectionRef, ids: readonly string[]): Promise<T[]>
+  /** Check an id exists and return it, without embedding the document. */
+  reference(collection: CollectionRef, id: string): Promise<string>
+
+  // — expensive work —
+  /**
+   * Run `fn` once and reuse the result until `input` or the config changes.
+   *
+   * Values round-trip through a structured codec, so a cached `Date` is still a
+   * `Date` on a warm build.
+   */
+  cache<T>(input: unknown, fn: () => Promise<T> | T, options?: { key?: string }): Promise<T>
+
+  // — escape hatches —
+  /** Write a file into the output directory; returns its path. */
+  emitFile(name: string, content: string | Uint8Array): Promise<string>
+  /** Mark a file as a rebuild trigger for this document. */
+  addWatchFile(path: string): void
+
   logger: Logger
 }
+
+/** A collection, referred to by its definition or its name. */
+export type CollectionRef = CollectionDefinition<never, never> | { name: string } | string
 
 export interface Logger {
   info(message: string): void
@@ -370,6 +407,10 @@ export interface StoreEntry {
   assets?: readonly string[]
   /** Files this document referenced, so a changed asset invalidates it. */
   assetDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
+  /** Documents this one referenced, so editing a target invalidates it. */
+  refDeps?: readonly { collection: string; id: string; digest: string }[]
+  /** Extra files that should trigger a rebuild of this document. */
+  watchFiles?: readonly string[]
   /**
    * Digest of everything the emitted output depends on.
    *

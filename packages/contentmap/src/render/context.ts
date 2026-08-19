@@ -1,4 +1,6 @@
 import type {
+  AnyDocument,
+  CollectionRef,
   DocumentMeta,
   ExcerptOptions,
   Image,
@@ -52,12 +54,24 @@ export type ImageResolver = (
   url: string
 ) => Promise<Image | undefined>
 
+/** Everything the builder supplies for relations, caching and file emission. */
+export interface ContextServices {
+  documents(collection: CollectionRef): Promise<AnyDocument[]>
+  resolve(collection: CollectionRef, id: string): Promise<AnyDocument>
+  resolveMany(collection: CollectionRef, ids: readonly string[]): Promise<AnyDocument[]>
+  reference(collection: CollectionRef, id: string): Promise<string>
+  cache<T>(input: unknown, fn: () => Promise<T> | T, options?: { key?: string }): Promise<T>
+  emitFile(name: string, content: string | Uint8Array): Promise<string>
+  addWatchFile(path: string): void
+}
+
 export interface ContextInput {
   meta: DocumentMeta
   body: string
   path: string
   renderer: Renderer | undefined
   logger: Logger
+  services?: ContextServices
   /** Copies a relative reference. Undefined disables asset handling entirely. */
   resolveAsset?: AssetResolver
   resolveImage?: ImageResolver
@@ -77,6 +91,13 @@ export interface ContextInput {
  */
 export function createTransformContext(input: ContextInput): TransformContext {
   const { meta, body, path, renderer, logger } = input
+
+  const services = (): ContextServices => {
+    if (!input.services) {
+      throw new Error('contentmap: transform services are unavailable outside a build')
+    }
+    return input.services
+  }
   const renderInput = { body, path, meta }
 
   // Two memos over ONE render. `rawPromise` is the renderer's output;
@@ -178,7 +199,19 @@ export function createTransformContext(input: ContextInput): TransformContext {
     skip(reason?: string): never {
       const signal: SkipSignal = { [SKIP]: true, reason }
       throw signal
-    }
+    },
+
+    documents: <T,>(collection: CollectionRef) =>
+      services().documents(collection) as Promise<T[]>,
+    resolve: <T,>(collection: CollectionRef, id: string) =>
+      services().resolve(collection, id) as Promise<T>,
+    resolveMany: <T,>(collection: CollectionRef, ids: readonly string[]) =>
+      services().resolveMany(collection, ids) as Promise<T[]>,
+    reference: (collection: CollectionRef, id: string) => services().reference(collection, id),
+    cache: <T,>(value: unknown, fn: () => Promise<T> | T, options?: { key?: string }) =>
+      services().cache(value, fn, options),
+    emitFile: (name: string, content: string | Uint8Array) => services().emitFile(name, content),
+    addWatchFile: (path: string) => services().addWatchFile(path)
   }
 }
 
