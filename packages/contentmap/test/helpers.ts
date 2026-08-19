@@ -7,6 +7,8 @@ import { test } from 'vitest'
 export interface Fixture {
   dir: string
   write(relative: string, content: string): Promise<string>
+  /** Binary write, creating parent directories like `write` does. */
+  writeBytes(relative: string, content: Uint8Array): Promise<string>
 }
 
 /**
@@ -26,6 +28,12 @@ export const fixtureTest = test.extend<{ fixture: Fixture }>({
         const path = join(dir, relative)
         await mkdir(dirname(path), { recursive: true })
         await writeFile(path, content, 'utf8')
+        return path
+      },
+      async writeBytes(relative, content) {
+        const path = join(dir, relative)
+        await mkdir(dirname(path), { recursive: true })
+        await writeFile(path, content)
         return path
       }
     })

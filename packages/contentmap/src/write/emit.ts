@@ -170,7 +170,8 @@ export async function emitCollection({
     const mod = moduleNameFor(entry.id)
     const file = `${mod}.js`
     const path = join(dir, file)
-    const fresh = stats.sources.get(path) !== entry.digest
+    // emitKey, not digest: output depends on referenced assets too.
+    const fresh = stats.sources.get(path) !== entry.emitKey
 
     // Reuse the serialized index fragment when the source is unchanged. This is
     // what makes an incremental rebuild cost one row rather than the corpus.
@@ -219,7 +220,7 @@ export async function emitCollection({
       // means unchanged output. Skipping serialize here keeps an incremental
       // rebuild proportional to what changed, not to corpus size.
       if (
-        stats.sources.get(item.path) === item.entry.digest &&
+        stats.sources.get(item.path) === item.entry.emitKey &&
         present.has(basename(item.path))
       ) {
         stats.skipped++
@@ -227,7 +228,7 @@ export async function emitCollection({
       }
       const full = item.full ?? splitFields(item.entry, collection).full
       await emit(item.path, `${BANNER}export default ${serialize(full)}\n`, stats, present)
-      stats.sources.set(item.path, item.entry.digest)
+      stats.sources.set(item.path, item.entry.emitKey)
     })
   }
 

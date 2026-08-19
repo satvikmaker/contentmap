@@ -38,11 +38,28 @@ export {
   slugify
 } from './render/index.ts'
 export { SKIP } from './types.ts'
+export {
+  AssetStore,
+  DEFAULT_ASSET_EXTENSIONS,
+  expandTemplate,
+  isImageExtension,
+  isRelativeUrl,
+  joinUrl,
+  rewriteHtml,
+  splitUrl
+} from './assets/index.ts'
+export { MissingImageProcessorError } from './render/context.ts'
 
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
 export type { HasUnserializable, InvalidType, NotSerializable } from './types.ts'
 export type { Loader, Query } from './runtime/index.ts'
 export type {
+  Asset,
+  Image,
+  ImageMeasurement,
+  ImagePlaceholder,
+  ImageProcessor,
+  MarkdownRenderOptions,
   ExcerptOptions,
   Heading,
   Logger,

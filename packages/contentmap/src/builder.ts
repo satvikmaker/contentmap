@@ -1,4 +1,4 @@
-import { extname } from 'node:path'
+import { dirname, extname, resolve } from 'node:path'
 import {
   codeFrame,
   DiagnosticBag,
@@ -11,6 +11,14 @@ import { resolveParser } from './parsers/index.ts'
 import { validate } from './validate/standard.ts'
 import { createTransformContext, isSkipSignal } from './render/index.ts'
 import {
+  AssetStore,
+  isImageExtension,
+  isRelativeUrl,
+  rewriteHtml,
+  splitUrl,
+  type ResolvedAsset
+} from './assets/index.ts'
+import {
   cleanOutput,
   createEmitStats,
   emitBarrel,
@@ -19,6 +27,7 @@ import {
   type EmitStats
 } from './write/emit.ts'
 import { mapLimit } from './utils/limit.ts'
+import { cacheKey } from './utils/digest.ts'
 import { suggest } from './utils/paths.ts'
 /** Field the frontmatter parsers write the document body into. */
 const BODY_FIELD = 'content'
@@ -30,6 +39,7 @@ import type {
   CollectionDefinition,
   Diagnostic,
   DocumentMeta,
+  Image,
   Logger,
   ResolvedConfig,
   Severity,
@@ -55,6 +65,7 @@ export class Builder {
   #previous = new Map<string, Map<string, PreviousState>>()
   #cache = new Map<string, StoreEntry[]>()
   #emitStats: EmitStats | undefined
+  #assets = new AssetStore()
   #scanned = 0
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
@@ -103,6 +114,7 @@ export class Builder {
     const started = performance.now()
     for (const k of Object.keys(this.phases)) delete this.phases[k]
     this.#scanned = 0
+    this.#assets.reset()
     this.#emit({ type: 'build:start' })
 
     const config = this.#config ?? (await this.resolve())
@@ -125,6 +137,10 @@ export class Builder {
         emitCollection({ collection, entries: result.entries, config, stats, diagnostics })
       )
     }
+
+    // One copy pass at the end: a file referenced by fifty documents is read,
+    // hashed and written exactly once.
+    await this.#assets.flush(config.output.assets, config.dryRun)
 
     await emitBarrel(config, stats)
     await emitTypes(config, stats)
@@ -150,7 +166,15 @@ export class Builder {
     config: ResolvedConfig,
     diagnostics: DiagnosticBag
   ): Promise<{ entries: StoreEntry[]; cacheHits: number }> {
-    const previous = this.#previous.get(collection.name)
+    const cachedEntries = this.#cache.get(collection.name) ?? []
+
+    // A document whose IMAGE changed is stale even though its own file did not.
+    // Velite invalidates only the edited content file, so a rebuilt site keeps
+    // serving fingerprinted URLs for bytes that no longer exist.
+    const previous = await this.#dropAssetStale(
+      this.#previous.get(collection.name),
+      cachedEntries
+    )
     const collected = await this.#time('read', () => collectFiles(collection, config, previous))
 
     // Read failures are diagnostics, never silence. An fd-exhausted or
@@ -176,7 +200,7 @@ export class Builder {
       })
     }
 
-    const cached = this.#cache.get(collection.name) ?? []
+    const cached = cachedEntries
     const cacheHits = collected.unchanged.length
     this.#scanned += cached.filter(e => collected.unchanged.includes(e.meta.filePath)).length
 
@@ -194,6 +218,14 @@ export class Builder {
     // version would silently survive into the output.
     const reusable = new Set(collected.unchanged)
     const entries: StoreEntry[] = cached.filter(e => reusable.has(e.meta.filePath))
+
+    // Reused documents never re-register their assets, so readopt them or the
+    // copier will delete files the emitted HTML still points at.
+    for (const entry of entries) {
+      if (entry.assets?.length) {
+        this.#assets.adopt(`${collection.name}\u0000${entry.id}`, entry.assets)
+      }
+    }
     entries.push(...fresh)
 
     // ── duplicate identity ──────────────────────────────────────────────────
@@ -282,6 +314,7 @@ export class Builder {
     body: string,
     diagnostics: DiagnosticBag
   ): Promise<Record<string, unknown> | undefined> {
+    const assets = this.#assetContext(collection, documentMeta, file.absolutePath)
     const ctx = createTransformContext({
       meta: documentMeta,
       // The parser's body, NOT validated[BODY_FIELD]: a schema that does not
@@ -289,7 +322,8 @@ export class Builder {
       body,
       path: file.absolutePath,
       renderer: this.#config?.renderer,
-      logger: this.#logger
+      logger: this.#logger,
+      ...assets
     })
 
     try {
@@ -329,6 +363,118 @@ export class Builder {
         ...(err?.hint === undefined ? {} : { hint: err.hint })
       })
       return undefined
+    }
+  }
+
+  /**
+   * Remove documents whose referenced assets changed from the reuse set, so
+   * they get re-read and re-processed like any other stale file.
+   */
+  async #dropAssetStale(
+    previous: Map<string, PreviousState> | undefined,
+    cached: readonly StoreEntry[]
+  ): Promise<Map<string, PreviousState> | undefined> {
+    if (!previous) return previous
+    const withAssets = cached.filter(e => e.assetDeps?.length)
+    if (withAssets.length === 0) return previous
+
+    let next: Map<string, PreviousState> | undefined
+    for (const entry of withAssets) {
+      if (await this.#assets.changed(entry.assetDeps!)) {
+        next ??= new Map(previous)
+        next.delete(entry.meta.filePath)
+      }
+    }
+    return next ?? previous
+  }
+
+  /**
+   * Asset handling scoped to one document.
+   *
+   * Relative references resolve against the REFERRING FILE, not the collection
+   * root, because that is how an author reads their own markdown.
+   */
+  #assetContext(
+    collection: CollectionDefinition,
+    documentMeta: DocumentMeta,
+    from: string
+  ): {
+    resolveAsset: (url: string) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
+    resolveImage: (url: string) => Promise<Image | undefined>
+    rewrite: (html: string) => Promise<string>
+  } {
+    const config = this.#config!
+    const ownerId = `${collection.name}\u0000${documentMeta.id}`
+
+    const register = async (url: string) => {
+      const { path: rawPath, suffix } = splitUrl(url)
+      if (!isRelativeUrl(rawPath)) return undefined
+      const ext = extname(rawPath).toLowerCase()
+      // The allowlist is what keeps `[see](./other.md)` from being read as an
+      // asset, failing, and taking the whole document with it.
+      if (!config.assetExtensions.includes(ext)) return undefined
+
+      const sourcePath = resolve(dirname(from), decodeURI(rawPath))
+      return await this.#assets.register({
+        sourcePath,
+        template: config.output.assetsName,
+        base: config.output.assetsBase,
+        suffix,
+        ownerId
+      })
+    }
+
+    const measure = async (url: string): Promise<Image | undefined> => {
+      const registered = await register(url)
+      if (!registered) return undefined
+      const processor = config.images
+      const measured = processor
+        ? await processor.measure(registered.buffer, registered.sourcePath)
+        : undefined
+      const base = {
+        src: registered.src,
+        size: registered.size,
+        width: measured?.width ?? 0,
+        height: measured?.height ?? 0,
+        format: measured?.format ?? extname(registered.sourcePath).slice(1),
+        aspectRatio: measured && measured.height > 0 ? measured.width / measured.height : 0
+      }
+      if (!processor?.placeholder || !measured) return base
+      const placeholder = await processor.placeholder(registered.buffer, registered.sourcePath)
+      return placeholder
+        ? { ...base, placeholder: placeholder.dataUri, color: placeholder.color }
+        : base
+    }
+
+    return {
+      resolveAsset: async url => {
+        const registered = await register(url)
+        return registered
+          ? { src: registered.src, sourcePath: registered.sourcePath, size: registered.size }
+          : undefined
+      },
+      resolveImage: measure,
+      rewrite: async html => {
+        const result = await rewriteHtml(html, {
+          resolve: async (url): Promise<ResolvedAsset | undefined> => {
+            const ext = extname(splitUrl(url).path).toLowerCase()
+            if (isImageExtension(ext) && config.images) {
+              const measured = await measure(url)
+              if (!measured) return undefined
+              return {
+                src: measured.src,
+                sourcePath: resolve(dirname(from), decodeURI(splitUrl(url).path)),
+                ...(measured.width > 0 ? { width: measured.width, height: measured.height } : {})
+              }
+            }
+            const registered = await register(url)
+            return registered
+              ? { src: registered.src, sourcePath: registered.sourcePath }
+              : undefined
+          }
+        })
+        return result.html
+      }
     }
   }
 
@@ -455,13 +601,21 @@ export class Builder {
 
       // The body already lives in `data` (under the parser's body field), so
       // keeping a second copy on the entry doubled resident memory for no gain.
+      const ownerId = `${collection.name}\u0000${id}`
+      const owned = this.#assets.ownedBy(ownerId)
+      const assetDeps = owned.length === 0 ? undefined : this.#assets.dependencies(ownerId)
       out.push({
         id,
         collection: collection.name,
         digest: file.digest,
+        emitKey:
+          assetDeps === undefined
+            ? file.digest
+            : cacheKey(file.digest, ...assetDeps.map(d => d.digest)),
         data,
         meta: documentMeta,
-        mtimeMs: file.mtimeMs
+        mtimeMs: file.mtimeMs,
+        ...(assetDeps === undefined ? {} : { assets: owned, assetDeps })
       })
     }
     return out

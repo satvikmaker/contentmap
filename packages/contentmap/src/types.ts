@@ -77,6 +77,60 @@ export interface Renderer {
   headings?(input: RenderInput): Promisable<readonly Heading[]>
 }
 
+export interface ImageMeasurement {
+  width: number
+  height: number
+  format: string
+}
+
+export interface ImagePlaceholder {
+  /** Data URI, generated at build time so the client ships no decoder. */
+  dataUri: string
+  /** Average colour as #rrggbb. */
+  color: string
+  opaque: boolean
+}
+
+/**
+ * Measures images and optionally produces a placeholder.
+ *
+ * Split from the renderer because the two have nothing to do with each other,
+ * and split out of core because measuring costs a dependency most projects that
+ * only ship prose do not need.
+ */
+export interface ImageProcessor {
+  name: string
+  measure(buffer: Uint8Array, path: string): Promisable<ImageMeasurement | undefined>
+  placeholder?(buffer: Uint8Array, path: string): Promisable<ImagePlaceholder | undefined>
+}
+
+export interface Asset {
+  /** Public URL. */
+  src: string
+  /** Bytes on disk. */
+  size: number
+}
+
+export interface Image extends Asset {
+  width: number
+  height: number
+  format: string
+  aspectRatio: number
+  /** Absent when no decoder is available (e.g. installed with --omit=optional). */
+  placeholder?: string
+  color?: string
+}
+
+export interface MarkdownRenderOptions {
+  /**
+   * Rewrite relative asset URLs in the output and copy what they point at.
+   * Default true.
+   */
+  assets?: boolean
+  /** Passed through to the renderer. */
+  renderer?: unknown
+}
+
 export interface TocEntry {
   depth: number
   text: string
@@ -128,7 +182,11 @@ export interface TransformContext {
   /** Raw body, frontmatter stripped. */
   body: string
   /** Rendered HTML, via the configured renderer. Memoised per document. */
-  markdown(options?: unknown): Promise<string>
+  markdown(options?: MarkdownRenderOptions): Promise<string>
+  /** Copy a file referenced relative to this document; returns its public URL. */
+  asset(path: string): Promise<string>
+  /** Copy an image and measure it. */
+  image(path: string): Promise<Image>
   /** Body as plain text, markup removed. Memoised. */
   plain(): Promise<string>
   excerpt(options?: ExcerptOptions): Promise<string>
@@ -259,6 +317,10 @@ export interface UserConfig {
   parsers?: readonly Parser[]
   /** Markdown renderer. Without one, `ctx.markdown()` is a build error. */
   renderer?: Renderer
+  /** Image measurement. Without one, `ctx.image()` is a build error. */
+  images?: ImageProcessor
+  /** Extensions treated as copyable assets. Defaults to a broad allowlist. */
+  assetExtensions?: readonly string[]
   concurrency?: number
   /** Parallel file reads. Defaults to 64, the measured optimum. */
   readConcurrency?: number
@@ -288,6 +350,8 @@ export interface ResolvedConfig {
   output: ResolvedOutput
   parsers: readonly Parser[]
   renderer: Renderer | undefined
+  images: ImageProcessor | undefined
+  assetExtensions: readonly string[]
   concurrency: number
   readConcurrency: number
   onValidationError: Severity
@@ -302,6 +366,19 @@ export interface StoreEntry {
   data: Record<string, unknown>
   meta: DocumentMeta
   mtimeMs: number
+  /** Emitted asset filenames this document owns. */
+  assets?: readonly string[]
+  /** Files this document referenced, so a changed asset invalidates it. */
+  assetDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
+  /**
+   * Digest of everything the emitted output depends on.
+   *
+   * NOT the same as `digest`, which covers only the source file. A document
+   * whose image changed produces different output from an identical source, so
+   * skipping the write on the source digest alone leaves the page pointing at a
+   * fingerprint that no longer exists on disk.
+   */
+  emitKey: string
 }
 
 export interface BuildResult {

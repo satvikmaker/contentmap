@@ -8,6 +8,7 @@ import type {
   ResolvedOutput,
   UserConfig
 } from '../types.ts'
+import { DEFAULT_ASSET_EXTENSIONS } from '../assets/index.ts'
 import { isIdentifier } from '../utils/paths.ts'
 import { loadModule } from './load.ts'
 
@@ -112,6 +113,10 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     output,
     parsers: user.parsers ?? [],
     renderer: user.renderer,
+    images: user.images,
+    assetExtensions: (user.assetExtensions ?? DEFAULT_ASSET_EXTENSIONS).map(e =>
+      e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`
+    ),
     concurrency: options.concurrency ?? user.concurrency ?? availableParallelism(),
     readConcurrency: user.readConcurrency ?? 64,
     onValidationError: options.onValidationError ?? user.onValidationError ?? 'fail',

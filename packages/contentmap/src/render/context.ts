@@ -1,6 +1,8 @@
 import type {
   DocumentMeta,
   ExcerptOptions,
+  Image,
+  MarkdownRenderOptions,
   Heading,
   Logger,
   ReadingTime,
@@ -31,12 +33,36 @@ export class MissingRendererError extends Error {
   }
 }
 
+export class MissingImageProcessorError extends Error {
+  override readonly name = 'MissingImageProcessorError'
+  readonly hint =
+    'Install @contentmap/image and set it in your config: `import { image } from "@contentmap/image"` then `images: image()`.'
+  constructor() {
+    super('No image processor configured, but ctx.image() was called')
+  }
+}
+
+/** Resolves and registers one asset referenced relative to a document. */
+export type AssetResolver = (
+  url: string
+) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
+
+/** Measures an already-registered asset. */
+export type ImageResolver = (
+  url: string
+) => Promise<Image | undefined>
+
 export interface ContextInput {
   meta: DocumentMeta
   body: string
   path: string
   renderer: Renderer | undefined
   logger: Logger
+  /** Copies a relative reference. Undefined disables asset handling entirely. */
+  resolveAsset?: AssetResolver
+  resolveImage?: ImageResolver
+  /** Rewrites relative URLs in rendered HTML. */
+  rewrite?: (html: string) => Promise<string>
 }
 
 /**
@@ -57,12 +83,17 @@ export function createTransformContext(input: ContextInput): TransformContext {
   let plainPromise: Promise<string> | undefined
   let headingsPromise: Promise<readonly Heading[]> | undefined
 
-  const markdown = (options?: unknown): Promise<string> => {
-    if (!renderer) return Promise.reject(new MissingRendererError('ctx.markdown()'))
+  const render = async (rendererOptions?: unknown, withAssets = true): Promise<string> => {
+    if (!renderer) throw new MissingRendererError('ctx.markdown()')
+    const html = await renderer.toHtml(renderInput, rendererOptions)
+    return withAssets && input.rewrite ? await input.rewrite(html) : html
+  }
+
+  const markdown = (options?: MarkdownRenderOptions): Promise<string> => {
     // Options bypass the cache: a caller asking for different output should get
     // it rather than whatever the first call happened to request.
-    if (options !== undefined) return Promise.resolve(renderer.toHtml(renderInput, options))
-    htmlPromise ??= Promise.resolve(renderer.toHtml(renderInput))
+    if (options !== undefined) return render(options.renderer, options.assets ?? true)
+    htmlPromise ??= render()
     return htmlPromise
   }
 
@@ -114,6 +145,18 @@ export function createTransformContext(input: ContextInput): TransformContext {
     },
     async readingTime(options: ReadingTimeOptions = {}): Promise<ReadingTime> {
       return readingTimeOf(await plain(), options)
+    },
+    async asset(url: string): Promise<string> {
+      if (!input.resolveAsset) throw new MissingRendererError('ctx.asset()')
+      const resolved = await input.resolveAsset(url)
+      if (!resolved) throw new Error(`Asset not found relative to this document: ${url}`)
+      return resolved.src
+    },
+    async image(url: string): Promise<Image> {
+      if (!input.resolveImage) throw new MissingImageProcessorError()
+      const resolved = await input.resolveImage(url)
+      if (!resolved) throw new Error(`Image not found relative to this document: ${url}`)
+      return resolved
     },
     skip(reason?: string): never {
       const signal: SkipSignal = { [SKIP]: true, reason }
