@@ -27,3 +27,6 @@ coverage/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+.fdgate-*/
+.bench-*/
+.bundle-*/

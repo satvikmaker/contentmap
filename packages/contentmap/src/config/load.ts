@@ -1,0 +1,121 @@
+import { readFile, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { cacheKey } from '../utils/digest.ts'
+
+/**
+ * Error codes Node raises when it cannot handle a TypeScript file itself.
+ *
+ * `e instanceof SyntaxError` is load-bearing and easy to omit: when the nearest
+ * package.json lacks `"type":"module"`, Node treats a .ts file as CJS and
+ * throws a bare SyntaxError with NO `.code`. Most published examples check
+ * codes only, so their fallback never fires and the build simply crashes.
+ */
+const RECOVERABLE = new Set([
+  'ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX',
+  'ERR_UNKNOWN_FILE_EXTENSION',
+  'ERR_REQUIRE_ESM',
+  'ERR_MODULE_NOT_FOUND'
+])
+
+function isRecoverable(e: unknown): boolean {
+  if (e instanceof SyntaxError) return true
+  const code: unknown = (e as { code?: unknown } | null)?.code
+  return typeof code === 'string' && RECOVERABLE.has(code)
+}
+
+export interface LoadedModule {
+  value: unknown
+  /** Files whose change should trigger a config reload. */
+  deps: string[]
+  digest: string
+  loader: 'native' | 'jiti'
+}
+
+/**
+ * Import a TS/JS module, preferring Node's own type stripping and falling back
+ * to jiti. jiti's 1.5MB babel blob is lazily loaded, so the happy path never
+ * touches it. We deliberately avoid esbuild here: velite and content-collections
+ * both pay an 11MB dependency plus a per-platform binary — which breaks in
+ * multi-arch Docker and read-only node_modules — purely to get a dependency
+ * graph we can obtain by scanning relative imports.
+ */
+export async function loadModule(path: string): Promise<LoadedModule> {
+  const abs = isAbsolute(path) ? path : resolve(path)
+  const source = await readFile(abs, 'utf8')
+  const deps = await scanDeps(abs, source)
+  const digest = cacheKey(source, ...(await Promise.all(deps.map(readOrEmpty))))
+
+  // mtimeMs, not Date.now(): a fresh query string per call would leak a module
+  // into Node's ESM registry on every reload and grow memory monotonically.
+  const { mtimeMs } = await stat(abs)
+  const url = `${pathToFileURL(abs).href}?t=${mtimeMs}`
+
+  try {
+    const mod: unknown = await import(url)
+    return { value: unwrap(mod), deps, digest, loader: 'native' }
+  } catch (error) {
+    if (!isRecoverable(error)) throw error
+    const { createJiti } = await import('jiti')
+    const jiti = createJiti(import.meta.url, { tsconfigPaths: true, interopDefault: true })
+    const mod: unknown = await jiti.import(abs, {})
+    return { value: unwrap(mod), deps, digest, loader: 'jiti' }
+  }
+}
+
+function unwrap(mod: unknown): unknown {
+  if (mod && typeof mod === 'object' && 'default' in mod) {
+    return (mod as { default: unknown }).default
+  }
+  return mod
+}
+
+async function readOrEmpty(p: string): Promise<string> {
+  try {
+    return await readFile(p, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+const IMPORT_RE = /(?:^|[\s;])(?:import|export)\b[^'"]*?from\s*['"](\.[^'"]+)['"]/g
+const BARE_IMPORT_RE = /(?:^|[\s;])import\s*['"](\.[^'"]+)['"]/g
+const REQUIRE_RE = /\brequire\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g
+
+const EXTENSIONS = ['', '.ts', '.mts', '.js', '.mjs', '/index.ts', '/index.js']
+
+/**
+ * Collect local (relative) imports one level deep, so the watcher knows which
+ * files should trigger a config reload. Regex rather than a real parser: this
+ * is exactly what Tailwind v4 does, and it avoids an esbuild dependency whose
+ * only purpose would be `metafile.inputs`.
+ */
+async function scanDeps(entry: string, source: string): Promise<string[]> {
+  const found = new Set<string>()
+  const base = dirname(entry)
+  for (const re of [IMPORT_RE, BARE_IMPORT_RE, REQUIRE_RE]) {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(source)) !== null) {
+      const spec = m[1]
+      if (spec) found.add(spec)
+    }
+  }
+  const resolved: string[] = []
+  for (const spec of found) {
+    const withoutExt = spec.replace(/\.(ts|mts|js|mjs)$/, '')
+    for (const ext of EXTENSIONS) {
+      const candidate = resolve(base, withoutExt + ext)
+      try {
+        const s = await stat(candidate)
+        if (s.isFile()) {
+          resolved.push(candidate)
+          break
+        }
+      } catch {
+        // try the next extension
+      }
+    }
+  }
+  return resolved.sort()
+}

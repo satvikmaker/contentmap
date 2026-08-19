@@ -3,11 +3,13 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023"],
+    "types": ["node"],
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
 
     "strict": true,
     "noUncheckedIndexedAccess": true,

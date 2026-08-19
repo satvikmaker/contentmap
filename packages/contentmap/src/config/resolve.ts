@@ -1,0 +1,183 @@
+import { stat } from 'node:fs/promises'
+import { availableParallelism } from 'node:os'
+import { dirname, isAbsolute, resolve } from 'node:path'
+import type {
+  BuilderOptions,
+  CollectionDefinition,
+  ResolvedConfig,
+  ResolvedOutput,
+  UserConfig
+} from '../types.ts'
+import { isIdentifier } from '../utils/paths.ts'
+import { loadModule } from './load.ts'
+
+export class ConfigError extends Error {
+  override readonly name = 'ConfigError'
+  readonly hint: string | undefined
+  constructor(message: string, hint?: string) {
+    super(message)
+    this.hint = hint
+  }
+}
+
+const CONFIG_NAMES = [
+  'contentmap.config.ts',
+  'contentmap.config.mts',
+  'contentmap.config.js',
+  'contentmap.config.mjs'
+]
+
+/**
+ * Find the config in the project root only.
+ *
+ * Deliberately does NOT walk up parent directories: velite recurses three
+ * levels and can silently pick up a monorepo parent's config, which produces
+ * baffling output in a workspace.
+ */
+export async function findConfig(root: string): Promise<string> {
+  for (const name of CONFIG_NAMES) {
+    const candidate = resolve(root, name)
+    try {
+      const s = await stat(candidate)
+      if (s.isFile()) return candidate
+    } catch {
+      // next candidate
+    }
+  }
+  throw new ConfigError(
+    `No contentmap config found in ${root}`,
+    `Create one of: ${CONFIG_NAMES.join(', ')} — or pass --config <path>.`
+  )
+}
+
+const DEFAULT_HEAVY = ['content', 'html', 'mdx', 'body', 'raw'] as const
+
+export async function resolveConfig(options: BuilderOptions = {}): Promise<ResolvedConfig> {
+  const cwd = options.root ? resolve(options.root) : process.cwd()
+  const configPath = options.config
+    ? isAbsolute(options.config)
+      ? options.config
+      : resolve(cwd, options.config)
+    : await findConfig(cwd)
+
+  const loaded = await loadModule(configPath)
+  const user = loaded.value as UserConfig | undefined
+
+  if (!user || typeof user !== 'object') {
+    throw new ConfigError(
+      `${configPath} has no default export`,
+      'Export your config as default: `export default defineConfig({ ... })`'
+    )
+  }
+  if (!user.collections || typeof user.collections !== 'object') {
+    throw new ConfigError(
+      `${configPath} does not define any collections`,
+      'Add a `collections` object: `defineConfig({ collections: { posts } })`'
+    )
+  }
+
+  const base = user.root ? resolve(dirname(configPath), user.root) : dirname(configPath)
+  const out = user.output ?? {}
+  const output: ResolvedOutput = {
+    dir: resolve(base, options.outDir ?? out.dir ?? '.contentmap'),
+    assets: resolve(base, out.assets ?? 'public/_content'),
+    assetsBase: out.assetsBase ?? '/_content/',
+    assetsName: out.assetsName ?? '[name]-[hash:8].[ext]',
+    format: options.format ?? out.format ?? 'modules',
+    types: out.types ?? 'trampoline',
+    clean: options.clean ?? out.clean ?? false
+  }
+
+  const collections = validateCollections(user.collections, base)
+
+  return {
+    root: base,
+    configPath,
+    configDeps: loaded.deps,
+    configDigest: loaded.digest,
+    collections,
+    output,
+    parsers: user.parsers ?? [],
+    concurrency: options.concurrency ?? user.concurrency ?? availableParallelism(),
+    onValidationError: options.onValidationError ?? user.onValidationError ?? 'fail',
+    onUnknownField: user.onUnknownField ?? 'warn'
+  }
+}
+
+/**
+ * Reject configs that would emit broken output.
+ *
+ * content-collections derives export names via `pluralize` with no collision
+ * check, so collections named `post` and `posts` both emit `allPosts` — a
+ * duplicate import and a SyntaxError — while the build reports success. Here
+ * that is a config error before anything is written.
+ */
+function validateCollections(
+  input: Record<string, CollectionDefinition>,
+  base: string
+): Record<string, CollectionDefinition> {
+  const out: Record<string, CollectionDefinition> = {}
+  const typeNames = new Map<string, string>()
+
+  for (const [key, def] of Object.entries(input)) {
+    if (!def || typeof def !== 'object') {
+      throw new ConfigError(`Collection "${key}" is not a collection definition`)
+    }
+    const name = def.name ?? key
+    if (!isIdentifier(name)) {
+      throw new ConfigError(
+        `Collection name "${name}" is not a valid JavaScript identifier`,
+        'Collection names become export names, so they must match /^[A-Za-z_$][A-Za-z0-9_$]*$/.'
+      )
+    }
+    if (!def.directory) {
+      throw new ConfigError(`Collection "${name}" is missing \`directory\``)
+    }
+    if (!def.include) {
+      throw new ConfigError(`Collection "${name}" is missing \`include\``)
+    }
+    if (!def.schema || typeof def.schema !== 'object' || !('~standard' in def.schema)) {
+      throw new ConfigError(
+        `Collection "${name}" has no Standard Schema in \`schema\``,
+        'Pass a zod, valibot, arktype or effect schema — anything implementing Standard Schema.'
+      )
+    }
+
+    const typeName = def.typeName ?? pascalSingular(name)
+    const clash = typeNames.get(typeName)
+    if (clash !== undefined) {
+      throw new ConfigError(
+        `Collections "${clash}" and "${name}" both produce the type name "${typeName}"`,
+        `Set an explicit \`typeName\` on one of them.`
+      )
+    }
+    typeNames.set(typeName, name)
+
+    out[name] = {
+      ...def,
+      name,
+      typeName,
+      directory: resolve(base, def.directory),
+      heavy: def.heavy ?? DEFAULT_HEAVY
+    }
+  }
+
+  if (Object.keys(out).length === 0) {
+    throw new ConfigError('No collections defined', 'Add at least one collection.')
+  }
+  return out
+}
+
+/** `posts` -> `Post`, `authors` -> `Author`, `news` -> `News`. */
+function pascalSingular(name: string): string {
+  const singular = singularize(name)
+  return singular.charAt(0).toUpperCase() + singular.slice(1)
+}
+
+function singularize(word: string): string {
+  if (/(ss|us|is|s's)$/i.test(word)) return word
+  if (/ies$/i.test(word)) return word.slice(0, -3) + 'y'
+  if (/(ch|sh|x|z|s)es$/i.test(word)) return word.slice(0, -2)
+  if (/s$/i.test(word)) return word.slice(0, -1)
+  return word
+}
