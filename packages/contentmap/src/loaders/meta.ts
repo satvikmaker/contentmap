@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { screenForSecrets } from '../security/secrets.ts'
 import type { LoadedRecord, MetaStore } from './types.ts'
@@ -82,13 +82,23 @@ export class RemoteStore {
     this.#dirty.clear()
   }
 
-  async drop(collection: string): Promise<void> {
-    this.#loaded.delete(collection)
-    this.#dirty.delete(collection)
-    await rm(this.#file(collection), { force: true })
+  /** Drop snapshots for collections that are no longer configured. */
+  async pruneTo(names: readonly string[], dryRun = false): Promise<void> {
+    if (dryRun) return
+    const keep = new Set(names.map(n => this.#basename(n)))
+    const present = await readdir(this.#dir).catch(() => [] as string[])
+    for (const file of present) {
+      if (!file.endsWith('.json') || keep.has(file.slice(0, -5))) continue
+      this.#loaded.delete(file.slice(0, -5))
+      await rm(join(this.#dir, file), { force: true })
+    }
+  }
+
+  #basename(collection: string): string {
+    return collection.replace(/[^A-Za-z0-9_-]/g, '_')
   }
 
   #file(collection: string): string {
-    return join(this.#dir, `${collection.replace(/[^A-Za-z0-9_-]/g, '_')}.json`)
+    return join(this.#dir, `${this.#basename(collection)}.json`)
   }
 }

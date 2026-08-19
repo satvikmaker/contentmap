@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFile, rm } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createBuilder } from '../src/builder.ts'
@@ -238,5 +238,112 @@ describe('remote collections', () => {
     const index = await readFile(join(fixture.dir, '.contentmap/releases/index.js'), 'utf8')
     expect(index).toContain('"v3"')
     expect(index).not.toContain('"v1"')
+  })
+})
+
+
+describe('remote collections share the file path\'s invariants', () => {
+  const authorsAndRemote = (loaderScript: string, transform: string) =>
+    `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}\n` +
+    `import { z } from 'zod'\n` +
+    `const authors = defineCollection({\n` +
+    `  name: 'authors', directory: 'content/authors', include: '**/*.yaml',\n` +
+    `  schema: z.object({ name: z.string() })\n` +
+    `})\n` +
+    `const releases = defineCollection({\n` +
+    `  name: 'releases',\n` +
+    `  loader: http({ url: 'https://x.invalid/r', select: p => p.items, id: r => r.slug, fetch: ${loaderScript} }),\n` +
+    `  schema: z.object({ slug: z.string(), version: z.string(), notes: z.string() }),\n` +
+    `  transform: ${transform}\n` +
+    `})\n` +
+    `export default defineConfig({ collections: { authors, releases } })\n`
+
+  fixtureTest('a reused record still refreshes when a referenced document changes', async ({
+    fixture
+  }) => {
+    // Reuse keyed on the record digest alone is not enough: the record may
+    // embed a document that moved underneath it.
+    await fixture.write('content/authors/jane.yaml', 'name: Jane')
+    await fixture.write(
+      'contentmap.config.ts',
+      authorsAndRemote(
+        `async () => new Response(${JSON.stringify(RECORDS)}, { status: 200 })`,
+        'async (doc, ctx) => ({ slug: doc.slug, author: await ctx.resolve(authors, "jane") })'
+      )
+    )
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain('"Jane"')
+
+    await new Promise(r => setTimeout(r, 10))
+    await fixture.write('content/authors/jane.yaml', 'name: Jane Updated')
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain(
+      '"Jane Updated"'
+    )
+  })
+
+  fixtureTest('siblings() sees the other records, not an empty list', async ({ fixture }) => {
+    // Reading the built entries would return nothing, because they do not
+    // exist yet while this collection's own transforms are running.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}\n` +
+        `import { z } from 'zod'\n` +
+        `const releases = defineCollection({\n` +
+        `  name: 'releases',\n` +
+        `  loader: http({ url: 'https://x.invalid/r', select: p => p.items, id: r => r.slug, fetch: async () => new Response(${JSON.stringify(RECORDS)}, { status: 200 }) }),\n` +
+        `  schema: z.object({ slug: z.string(), version: z.string(), notes: z.string() }),\n` +
+        `  transform: async (doc, ctx) => ({ slug: doc.slug, others: (await ctx.siblings()).map(s => s.slug) })\n` +
+        `})\n` +
+        `export default defineConfig({ collections: { releases } })\n`
+    )
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain('"v2"')
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v2.js'), 'utf8')).toContain('"v1"')
+  })
+})
+
+describe('cache hygiene', () => {
+  fixtureTest('removes caches for collections that leave the config', async ({ fixture }) => {
+    const two =
+      `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}\n` +
+      `import { z } from 'zod'\n` +
+      `const releases = defineCollection({\n` +
+      `  name: 'releases',\n` +
+      `  loader: http({ url: 'https://x.invalid/r', select: p => p.items, id: r => r.slug, fetch: async () => new Response(${JSON.stringify(RECORDS)}, { status: 200 }) }),\n` +
+      `  schema: z.object({ slug: z.string(), version: z.string(), notes: z.string() }),\n` +
+      `  transform: async (doc, ctx) => ({ slug: doc.slug, n: await ctx.cache({ s: doc.slug }, () => 1) })\n` +
+      `})\n`
+
+    await fixture.write(
+      'contentmap.config.ts',
+      `${two}export default defineConfig({ collections: { releases } })\n`
+    )
+    await createBuilder({ root: fixture.dir }).build()
+    expect(await readdir(join(fixture.dir, '.contentmap/.cache/remote'))).toContain('releases.json')
+    expect(await readdir(join(fixture.dir, '.contentmap/.cache/transforms'))).toContain(
+      'releases.json'
+    )
+
+    // The collection is gone; its caches must go with it.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}\n` +
+        `import { z } from 'zod'\n` +
+        `const other = defineCollection({ name: 'other', directory: 'content/o', include: '**/*.md', schema: z.object({ title: z.string() }) })\n` +
+        `export default defineConfig({ collections: { other } })\n`
+    )
+    await fixture.write('content/o/a.md', '---\ntitle: A\n---\nx')
+    await createBuilder({ root: fixture.dir }).build()
+
+    expect(await readdir(join(fixture.dir, '.contentmap/.cache/remote'))).not.toContain(
+      'releases.json'
+    )
+    expect(await readdir(join(fixture.dir, '.contentmap/.cache/transforms'))).not.toContain(
+      'releases.json'
+    )
   })
 })

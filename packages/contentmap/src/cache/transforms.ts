@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { cacheKey, stableStringify } from '../utils/digest.ts'
 import { decode, encode } from './codec.ts'
@@ -111,11 +111,25 @@ export class TransformCache {
     this.#dirty.clear()
   }
 
-  /** Forget a collection entirely — used when it disappears from the config. */
-  async drop(collection: string): Promise<void> {
-    this.#loaded.delete(collection)
-    this.#next.delete(collection)
-    await rm(this.#file(collection), { force: true })
+  /**
+   * Remove cache files for collections that no longer exist.
+   *
+   * Without this, renaming or deleting a collection leaves its cache on disk
+   * forever — the same slow accumulation that makes a long-lived
+   * content-collections project carry entries for documents that are gone.
+   */
+  async pruneTo(names: readonly string[], dryRun = false): Promise<void> {
+    if (dryRun) return
+    const keep = new Set(names.map(n => this.#basename(n)))
+    const present = await readdir(this.#dir).catch(() => [] as string[])
+    for (const file of present) {
+      if (!file.endsWith('.json') || keep.has(file.slice(0, -5))) continue
+      await rm(join(this.#dir, file), { force: true })
+    }
+  }
+
+  #basename(collection: string): string {
+    return collection.replace(/[^A-Za-z0-9_-]/g, '_')
   }
 
   reset(): void {
@@ -124,6 +138,6 @@ export class TransformCache {
   }
 
   #file(collection: string): string {
-    return join(this.#dir, `${collection.replace(/[^A-Za-z0-9_-]/g, '_')}.json`)
+    return join(this.#dir, `${this.#basename(collection)}.json`)
   }
 }

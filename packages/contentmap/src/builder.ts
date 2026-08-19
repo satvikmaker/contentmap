@@ -123,6 +123,8 @@ export class Builder {
   /** Per-build memo of every validated document in a collection, for siblings(). */
   #validated = new Map<string, Promise<AnyDocument[]>>()
   #remote!: RemoteStore
+  /** Records the loader produced this build, so siblings() can use them. */
+  #loaded = new Map<string, LoadedRecord[]>()
   #abort = new AbortController()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
@@ -175,6 +177,7 @@ export class Builder {
     this.#built.clear()
     this.#inFlight.clear()
     this.#validated.clear()
+    this.#loaded.clear()
     this.#emit({ type: 'build:start' })
 
     const config = this.#config ?? (await this.resolve())
@@ -222,6 +225,10 @@ export class Builder {
       config.dryRun
     )
 
+    // Collections that disappeared from the config must not leave caches behind.
+    const names = Object.keys(config.collections)
+    await this.#transformCache?.pruneTo(names, config.dryRun)
+    await this.#remote?.pruneTo(names, config.dryRun)
     await this.#transformCache?.flush(config.dryRun)
     await this.#remote?.flush(config.dryRun)
 
@@ -496,6 +503,21 @@ export class Builder {
    * Remove documents whose referenced assets changed from the reuse set, so
    * they get re-read and re-processed like any other stale file.
    */
+  /** Has anything this document depends on changed since it was built? */
+  async #dependenciesChanged(
+    entry: StoreEntry,
+    collection: CollectionDefinition,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<boolean> {
+    if (entry.assetDeps?.length && (await this.#assets.changed(entry.assetDeps))) return true
+    if (entry.refDeps?.length) {
+      return await this.#referencesChanged(entry.refDeps, config, diagnostics, stack, collection)
+    }
+    return false
+  }
+
   async #dropAssetStale(
     previous: Map<string, PreviousState> | undefined,
     cached: readonly StoreEntry[],
@@ -508,12 +530,7 @@ export class Builder {
     let next: Map<string, PreviousState> | undefined
 
     for (const entry of cached) {
-      let stale = false
-      if (entry.assetDeps?.length) stale = await this.#assets.changed(entry.assetDeps)
-      if (!stale && entry.refDeps?.length) {
-        stale = await this.#referencesChanged(entry.refDeps, config, diagnostics, stack, collection)
-      }
-      if (stale) {
+      if (await this.#dependenciesChanged(entry, collection, config, diagnostics, stack)) {
         next ??= new Map(previous)
         next.delete(entry.meta.filePath)
       }
@@ -608,6 +625,8 @@ export class Builder {
       return { entries: [], cacheHits: 0 }
     }
 
+    this.#loaded.set(collection.name, loaded.records)
+
     const cached = this.#cache.get(collection.name) ?? []
     const previousDigests = new Map(cached.map(e => [e.id, e.digest] as const))
     const reusable = new Map(cached.map(e => [e.id, e] as const))
@@ -616,9 +635,9 @@ export class Builder {
     let cacheHits = 0
     const seen = new Map<string, number>()
 
-    // Remote endpoints rate-limit; local disks do not. This is deliberately not
-    // the file-read concurrency.
-    const results = await mapLimit(loaded.records, REMOTE_CONCURRENCY, async record => {
+    // Validating and transforming records is CPU-bound, exactly like the file
+    // path. How many requests a loader makes is the loader's own business.
+    const results = await mapLimit(loaded.records, config.concurrency, async record => {
       this.#scanned += 1
 
       const duplicate = seen.get(record.id)
@@ -637,9 +656,18 @@ export class Builder {
 
       const unchanged = previousDigests.get(record.id) === record.digest
       const prior = reusable.get(record.id)
-      if (unchanged && prior) {
+      // The record being unchanged is necessary but not sufficient: it may
+      // embed a document or reference an image that moved underneath it. The
+      // file path learned this the hard way; the loader path gets it for free
+      // by sharing the same check.
+      if (unchanged && prior && !(await this.#dependenciesChanged(prior, collection, config, diagnostics, stack))) {
         cacheHits += 1
         await this.#transformCache?.retain(collection.name, record.id)
+        // Reused documents never re-register their assets, so readopt them or
+        // the copier removes files the emitted output still points at.
+        if (prior.assets?.length) {
+          this.#assets.adopt(refKey(collection.name, prior.id), prior.assets)
+        }
         return prior
       }
 
@@ -671,17 +699,8 @@ export class Builder {
     diagnostics: DiagnosticBag,
     stack: readonly string[]
   ): Promise<StoreEntry | undefined> {
-    const source = `${collection.loader!.name}:${record.id}`
-    const meta: DocumentMeta = {
-      id: record.id,
-      filePath: source,
-      fileName: record.id,
-      directory: collection.loader!.name,
-      extension: '',
-      path: record.id,
-      slug: record.id.split('/').pop() ?? record.id,
-      digest: record.digest
-    }
+    const meta = metaForRecord(record, collection)
+    const source = meta.filePath
 
     const raw: Record<string, unknown> = { ...record.data }
     let injectedBody: string | undefined
@@ -783,10 +802,21 @@ export class Builder {
 
     const promise = (async () => {
       if (collection.loader) {
-        // A loader-backed collection has no files to re-read; its validated
-        // form is whatever the build produced.
-        const built = this.#built.get(collection.name)
-        return (built?.entries ?? []).map(e => ({ ...e.data, _meta: e.meta }) as AnyDocument)
+        // A loader-backed collection has no files to re-read, and the built
+        // entries do not exist yet while its own transforms are running —
+        // reading them would silently return an empty list. Validate the
+        // records the loader already produced instead.
+        const records = this.#loaded.get(collection.name) ?? []
+        const docs = await mapLimit(records, config.concurrency, async record => {
+          const raw: Record<string, unknown> = { ...record.data }
+          if (record.body !== undefined && !(BODY_FIELD in raw)) raw[BODY_FIELD] = record.body
+          const result = await validate(collection.schema, raw)
+          if (!result.ok) return undefined
+          return { ...result.value, _meta: metaForRecord(record, collection) } as AnyDocument
+        })
+        return docs
+          .filter((d): d is AnyDocument => d !== undefined)
+          .sort((a, b) => (a._meta.id < b._meta.id ? -1 : a._meta.id > b._meta.id ? 1 : 0))
       }
       const collected = await collectFiles(collection, config)
       const groups = await mapLimit(collected.files, config.concurrency, async file =>
@@ -1316,8 +1346,25 @@ export class MissingReferenceError extends Error {
 
 const refKey = (collection: string, id: string): string => `${collection}\u0000${id}`
 
-/** Remote endpoints rate-limit; local disks do not. */
-const REMOTE_CONCURRENCY = 8
+/**
+ * Metadata for a record that has no file behind it.
+ *
+ * `filePath` becomes `<loader>:<id>`, which is what diagnostics print, so a
+ * failure in a remote collection still says where it came from.
+ */
+function metaForRecord(record: LoadedRecord, collection: CollectionDefinition): DocumentMeta {
+  const loader = collection.loader?.name ?? 'loader'
+  return {
+    id: record.id,
+    filePath: `${loader}:${record.id}`,
+    fileName: record.id,
+    directory: loader,
+    extension: '',
+    path: record.id,
+    slug: record.id.split('/').pop() ?? record.id,
+    digest: record.digest
+  }
+}
 
 function applySort(
   entries: StoreEntry[],
