@@ -28,11 +28,18 @@ import {
   type EmitStats
 } from './write/emit.ts'
 import { mapLimit } from './utils/limit.ts'
-import { cacheKey } from './utils/digest.ts'
+import { cacheKey, stableStringify } from './utils/digest.ts'
 import { TransformCache } from './cache/index.ts'
 import { suggest } from './utils/paths.ts'
 /** Field the frontmatter parsers write the document body into. */
 const BODY_FIELD = 'content'
+
+interface ParsedDocument {
+  id: string
+  meta: DocumentMeta
+  validated: Record<string, unknown>
+  body: string
+}
 
 interface CollectionResult {
   entries: StoreEntry[]
@@ -110,6 +117,8 @@ export class Builder {
   /** Per-document reference and watch records, harvested after each transform. */
   #refsFor = new Map<string, { collection: string; id: string; digest: string }[]>()
   #watchFor = new Map<string, string[]>()
+  /** Per-build memo of every validated document in a collection, for siblings(). */
+  #validated = new Map<string, Promise<AnyDocument[]>>()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
     warn: message => this.#emit({ type: 'log', level: 'warn', message }),
@@ -160,6 +169,7 @@ export class Builder {
     this.#assets.reset()
     this.#built.clear()
     this.#inFlight.clear()
+    this.#validated.clear()
     this.#emit({ type: 'build:start' })
 
     const config = this.#config ?? (await this.resolve())
@@ -283,7 +293,8 @@ export class Builder {
       cachedEntries,
       config,
       diagnostics,
-      stack
+      stack,
+      collection
     )
     const collected = await this.#time('read', () => collectFiles(collection, config, previous))
 
@@ -402,15 +413,6 @@ export class Builder {
     return { entries: finalEntries, cacheHits }
   }
 
-  #reportUnknownFields(
-    raw: Record<string, unknown>,
-    validated: Record<string, unknown>,
-    injectedBody: string | undefined,
-    ctx: UnknownFieldContext
-  ): void {
-    reportUnknownFields(raw, validated, injectedBody, ctx)
-  }
-
   /**
    * Run a collection's transform.
    *
@@ -495,7 +497,8 @@ export class Builder {
     cached: readonly StoreEntry[],
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
-    stack: readonly string[]
+    stack: readonly string[],
+    collection: CollectionDefinition
   ): Promise<Map<string, PreviousState> | undefined> {
     if (!previous) return previous
     let next: Map<string, PreviousState> | undefined
@@ -504,7 +507,7 @@ export class Builder {
       let stale = false
       if (entry.assetDeps?.length) stale = await this.#assets.changed(entry.assetDeps)
       if (!stale && entry.refDeps?.length) {
-        stale = await this.#referencesChanged(entry.refDeps, config, diagnostics, stack)
+        stale = await this.#referencesChanged(entry.refDeps, config, diagnostics, stack, collection)
       }
       if (stale) {
         next ??= new Map(previous)
@@ -525,11 +528,24 @@ export class Builder {
     refs: readonly { collection: string; id: string; digest: string }[],
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
-    stack: readonly string[]
+    stack: readonly string[],
+    self: CollectionDefinition
   ): Promise<boolean> {
     for (const ref of refs) {
       // A collection that no longer exists means the reference is gone too.
-      if (!config.collections[ref.collection]) return true
+      const definition = config.collections[ref.collection]
+      if (!definition) return true
+
+      // A dependency on this collection itself comes from siblings(), and is
+      // answered from the validated form rather than by building the
+      // collection — which is exactly what we are deciding how to do.
+      if (ref.collection === self.name) {
+        if (ref.id !== '*') continue
+        const all = await this.#validatedDocuments(self, config, diagnostics)
+        if (cacheKey(...all.map(d => stableStringify(d))) !== ref.digest) return true
+        continue
+      }
+
       if (stack.includes(ref.collection)) continue
       const target = await this.#ensureBuilt(ref.collection, config, diagnostics, stack)
       if (ref.id === '*') {
@@ -540,6 +556,38 @@ export class Builder {
       if (!found || found.emitKey !== ref.digest) return true
     }
     return false
+  }
+
+  /**
+   * Every document in a collection as the schema validated it, before any
+   * transform ran.
+   *
+   * This is what makes sibling access possible. A transform cannot read its own
+   * collection's transformed output — the collection would depend on itself —
+   * but the validated form is well defined and non-circular. Computed by
+   * re-reading the collection independently of the incremental path, because
+   * cached entries only retain their POST-transform data.
+   */
+  #validatedDocuments(
+    collection: CollectionDefinition,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag
+  ): Promise<AnyDocument[]> {
+    const existing = this.#validated.get(collection.name)
+    if (existing) return existing
+
+    const promise = (async () => {
+      const collected = await collectFiles(collection, config)
+      const groups = await mapLimit(collected.files, config.concurrency, async file =>
+        this.#parseFile(file, collection, config, diagnostics, false)
+      )
+      return groups
+        .flat()
+        .map(p => ({ ...p.validated, _meta: p.meta }) as AnyDocument)
+        .sort((a, b) => (a._meta.id < b._meta.id ? -1 : a._meta.id > b._meta.id ? 1 : 0))
+    })()
+    this.#validated.set(collection.name, promise)
+    return promise
   }
 
   /**
@@ -566,7 +614,15 @@ export class Builder {
       return { name, result: await this.#ensureBuilt(name, config, diagnostics, stack) }
     }
 
-    const lookup = async (ref: CollectionRef, id: string): Promise<StoreEntry> => {
+    const lookup = async (
+      ref: CollectionRef,
+      id: string,
+      /** Embedding copies content, so the referrer depends on it. A bare
+       *  reference keeps only the id, so it depends on existence alone —
+       *  tracking content there would rebuild every referrer on any edit to the
+       *  target, which is the cost `reference()` exists to avoid. */
+      mode: 'embed' | 'exists' = 'embed'
+    ): Promise<StoreEntry> => {
       const { name, result } = await targetOf(ref)
       const found = result.entries.find(e => e.id === id)
       if (!found) {
@@ -575,12 +631,28 @@ export class Builder {
         // lists`, so a broken list reference passes silently.
         throw new MissingReferenceError(name, id, result.entries.map(e => e.id))
       }
-      refs.push({ collection: name, id, digest: found.emitKey })
+      refs.push({ collection: name, id, digest: mode === 'embed' ? found.emitKey : 'exists' })
       return found
     }
 
     return {
+      siblings: async () => {
+        const all = await this.#validatedDocuments(collection, config, diagnostics)
+        // The whole collection is a dependency: adding or removing any document
+        // changes what every other one sees.
+        refs.push({
+          collection: collection.name,
+          id: '*',
+          digest: cacheKey(...all.map(d => stableStringify(d)))
+        })
+        return all.filter(d => d._meta.id !== documentMeta.id)
+      },
       documents: async ref => {
+        const requested =
+          typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+        if (requested === collection.name) {
+          throw new SelfReferenceError(collection.name)
+        }
         const { name, result } = await targetOf(ref)
         // Depend on the whole collection, so adding or removing a document in
         // it invalidates this one.
@@ -594,20 +666,26 @@ export class Builder {
       resolve: async (ref, id) => toDocument(await lookup(ref, id)),
       resolveMany: async (ref, ids) => {
         const settled = await Promise.allSettled(ids.map(id => lookup(ref, id)))
-        const missing = settled
-          .map((r, i) => (r.status === 'rejected' ? ids[i] : undefined))
-          .filter((v): v is string => v !== undefined)
-        // Report every missing id, not just the first: fixing them one build at
-        // a time is miserable on a large corpus.
-        if (missing.length > 0) {
-          const first = settled.find(r => r.status === 'rejected') as PromiseRejectedResult
-          const err = first.reason as MissingReferenceError
+        const rejected = settled.filter(r => r.status === 'rejected') as PromiseRejectedResult[]
+
+        // A cycle or an unknown collection is not a missing id; repackaging it
+        // would report a structural problem as a typo.
+        const other = rejected.find(r => !(r.reason instanceof MissingReferenceError))
+        if (other) throw other.reason
+
+        if (rejected.length > 0) {
+          // Report every missing id, not just the first: fixing them one build
+          // at a time is miserable on a large corpus.
+          const missing = settled
+            .map((r, i) => (r.status === 'rejected' ? ids[i] : undefined))
+            .filter((v): v is string => v !== undefined)
+          const err = rejected[0]!.reason as MissingReferenceError
           throw new MissingReferenceError(err.collection, missing.join('", "'), err.known)
         }
         return settled.map(r => toDocument((r as PromiseFulfilledResult<StoreEntry>).value))
       },
       reference: async (ref, id) => {
-        await lookup(ref, id)
+        await lookup(ref, id, 'exists')
         return id
       },
       cache: (input, fn, options) =>
@@ -749,20 +827,26 @@ export class Builder {
     }
   }
 
-  async #processFile(
+  /**
+   * Parse and validate one file. No transform runs here.
+   *
+   * Split out so the validated form of a whole collection can be produced
+   * without executing transforms, which is what `siblings()` needs.
+   */
+  async #parseFile(
     file: SourceFile,
     collection: CollectionDefinition,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
-    stack: readonly string[]
-  ): Promise<StoreEntry[]> {
+    count = true
+  ): Promise<ParsedDocument[]> {
     const parser = resolveParser(
       file.extension || extname(file.relativePath),
       collection.parser,
       config.parsers
     )
     if (!parser) {
-      this.#scanned += 1
+      if (count) this.#scanned += 1
       diagnostics.add({
         code: 'CM_PARSE',
         severity: 'error',
@@ -781,7 +865,7 @@ export class Builder {
       // js-yaml (vendored by confbox) appends its own multi-line ASCII frame to
       // `.message`. Left alone it lands inside our tree with foreign
       // indentation and makes --json messages multi-line.
-      this.#scanned += 1
+      if (count) this.#scanned += 1
       const { message, position } = normalizeParserError(error)
       diagnostics.add({
         code: 'CM_PARSE',
@@ -789,7 +873,9 @@ export class Builder {
         message,
         file: file.relativePath,
         collection: collection.name,
-        ...(position ? { line: position.line, ...(position.column === undefined ? {} : { column: position.column }) } : {}),
+        ...(position
+          ? { line: position.line, ...(position.column === undefined ? {} : { column: position.column }) }
+          : {}),
         ...(position ? { frame: codeFrame(file.content, position) } : {}),
         hint: `Parsed with the "${parser.name}" parser.`
       })
@@ -797,13 +883,13 @@ export class Builder {
     }
 
     const records = Array.isArray(parsed) ? parsed : [parsed]
-    this.#scanned += records.length
+    if (count) this.#scanned += records.length
     const meta = metaFor(file, collection.directory)
-    const out: StoreEntry[] = []
+    const out: ParsedDocument[] = []
 
-    for (const [i, record] of records.entries()) {
+    for (const [index, record] of records.entries()) {
       const many = records.length > 1
-      const id = many ? `${meta.id}[${i}]` : meta.id
+      const id = many ? `${meta.id}[${index}]` : meta.id
       const raw: Record<string, unknown> = { ...record.data }
       // Remember whether WE injected the body, so it is never reported as an
       // unknown field for a schema that simply does not want it.
@@ -831,7 +917,9 @@ export class Builder {
               message: issue.message,
               file: file.relativePath,
               ...(issue.path === undefined ? {} : { field: issue.path }),
-              ...(at ? { line: at.line, ...(at.column === undefined ? {} : { column: at.column }) } : {}),
+              ...(at
+                ? { line: at.line, ...(at.column === undefined ? {} : { column: at.column }) }
+                : {}),
               ...(at ? { frame: codeFrame(file.content, at) } : {}),
               collection: collection.name,
               documentId: id,
@@ -840,11 +928,10 @@ export class Builder {
           }
         }
         // Only 'warn' keeps the invalid document. Emitting a record that
-        // violates its own declared type — velite's default — makes the
-        // generated .d.ts a lie.
+        // violates its own declared type makes the generated .d.ts a lie.
         if (policy !== 'warn') continue
       } else {
-        this.#reportUnknownFields(raw, result.value, injectedBody, {
+        reportUnknownFields(raw, result.value, injectedBody, {
           file: file.relativePath,
           source: file.content,
           collection: collection.name,
@@ -854,27 +941,50 @@ export class Builder {
         })
       }
 
-      const documentMeta = many ? { ...meta, id } : meta
-      const validated = result.ok ? result.value : raw
+      out.push({
+        id,
+        meta: many ? { ...meta, id } : meta,
+        validated: result.ok ? result.value : raw,
+        body: record.body ?? ''
+      })
+    }
+    return out
+  }
 
-      let data: Record<string, unknown> = validated
+  /** Parse, validate, then transform. Produces the entries that get emitted. */
+  async #processFile(
+    file: SourceFile,
+    collection: CollectionDefinition,
+    config: ResolvedConfig,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<StoreEntry[]> {
+    const parsed = await this.#parseFile(file, collection, config, diagnostics)
+    const out: StoreEntry[] = []
+
+    for (const pending of parsed) {
+      let data: Record<string, unknown> = pending.validated
       if (collection.transform) {
         const transformed = await this.#runTransform(
           collection,
-          validated,
-          documentMeta,
+          pending.validated,
+          pending.meta,
           file,
-          record.body ?? '',
+          pending.body,
           diagnostics,
           stack
         )
-        if (transformed === undefined) continue
+        if (transformed === undefined) {
+          // The transform failed or skipped, so nothing will harvest these.
+          const failed = refKey(collection.name, pending.id)
+          this.#refsFor.delete(failed)
+          this.#watchFor.delete(failed)
+          continue
+        }
         data = transformed
       }
 
-      // The body already lives in `data` (under the parser's body field), so
-      // keeping a second copy on the entry doubled resident memory for no gain.
-      const ownerId = refKey(collection.name, id)
+      const ownerId = refKey(collection.name, pending.id)
       const owned = this.#assets.ownedBy(ownerId)
       const assetDeps = owned.length === 0 ? undefined : this.#assets.dependencies(ownerId)
       const refDeps = dedupeRefs(this.#refsFor.get(ownerId))
@@ -883,7 +993,7 @@ export class Builder {
       this.#watchFor.delete(ownerId)
 
       out.push({
-        id,
+        id: pending.id,
         collection: collection.name,
         digest: file.digest,
         // Output depends on the source file, every asset it references, and
@@ -894,7 +1004,7 @@ export class Builder {
           ...(refDeps ?? []).map(r => `${r.collection}/${r.id}@${r.digest}`)
         ),
         data,
-        meta: documentMeta,
+        meta: pending.meta,
         mtimeMs: file.mtimeMs,
         ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
         ...(refDeps === undefined ? {} : { refDeps }),
@@ -966,6 +1076,16 @@ class OutsideRootError extends Error {
     super(`"${url}" resolves outside the project root (${resolved})`)
     this.url = url
     this.hint = 'Assets must live inside the project. Move the file, or set `root` in your config.'
+  }
+}
+
+/** A transform asking for its own collection through `documents()`. */
+export class SelfReferenceError extends Error {
+  override readonly name = 'SelfReferenceError'
+  readonly hint =
+    'Use `ctx.siblings()` for the other documents in this collection. They are the schema-validated form, because a transform cannot see its own collection\'s transformed output.'
+  constructor(collection: string) {
+    super(`Collection "${collection}" cannot read itself through documents()`)
   }
 }
 

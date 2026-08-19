@@ -205,11 +205,23 @@ export interface TransformContext {
    * reordering an array silently changes your data (their issue #396, open
    * since Nov 2024). Here the target is built on demand, so order is irrelevant.
    */
-  documents<T = AnyDocument>(collection: CollectionRef): Promise<T[]>
+  documents<C extends CollectionRef>(collection: C): Promise<DocumentOf<C>[]>
+  /**
+   * Every OTHER document in this collection, as validated by the schema.
+   *
+   * Pre-transform by construction: a transform cannot see its own collection's
+   * transformed output without the collection depending on itself. This is what
+   * "related posts" and "previous/next" need, and asking for the collection
+   * itself through `documents()` is reported as a cycle.
+   */
+  siblings<T = AnyDocument>(): Promise<T[]>
   /** Embed one document. Missing ids fail the build, naming the file. */
-  resolve<T = AnyDocument>(collection: CollectionRef, id: string): Promise<T>
+  resolve<C extends CollectionRef>(collection: C, id: string): Promise<DocumentOf<C>>
   /** Embed several. Every missing id is reported, not just the first. */
-  resolveMany<T = AnyDocument>(collection: CollectionRef, ids: readonly string[]): Promise<T[]>
+  resolveMany<C extends CollectionRef>(
+    collection: C,
+    ids: readonly string[]
+  ): Promise<DocumentOf<C>[]>
   /** Check an id exists and return it, without embedding the document. */
   reference(collection: CollectionRef, id: string): Promise<string>
 
@@ -233,6 +245,22 @@ export interface TransformContext {
 
 /** A collection, referred to by its definition or its name. */
 export type CollectionRef = CollectionDefinition<never, never> | { name: string } | string
+
+/**
+ * The document type a collection produces.
+ *
+ * Passing the definition itself — `ctx.resolve(authors, id)` — recovers the
+ * author's real shape, including whatever its transform added. Referring to a
+ * collection by name cannot be typed, so it degrades to `AnyDocument`.
+ */
+export type DocumentOf<C> =
+  C extends CollectionDefinition<infer S, infer O>
+    ? (unknown extends O ? InferOutput<S> : O) extends infer Data
+      ? Data extends Record<string, unknown>
+        ? Data & { _meta: DocumentMeta }
+        : AnyDocument
+      : AnyDocument
+    : AnyDocument
 
 export interface Logger {
   info(message: string): void

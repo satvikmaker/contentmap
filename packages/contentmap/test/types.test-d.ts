@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { defineCollection } from '../src/config/define.ts'
+import type { AnyDocument, DocumentMeta, DocumentOf } from '../src/types.ts'
 import type { HasUnserializable, InvalidType, NotSerializable } from '../src/types.ts'
 
 describe('serializability is enforced at compile time', () => {
@@ -43,5 +44,29 @@ describe('serializability is enforced at compile time', () => {
     // tsc prints the embedded sentence and a docs link rather than a
     // structural mismatch the reader has to decode.
     expectTypeOf(bad).toEqualTypeOf<InvalidType<NotSerializable, { render: () => string }>>()
+  })
+})
+
+
+describe('reference inference', () => {
+  const authors = defineCollection({
+    name: 'authors',
+    directory: 'content/authors',
+    include: '**/*.yaml',
+    schema: z.object({ id: z.string(), name: z.string() }),
+    transform: d => ({ ...d, initials: d.name.slice(0, 1) })
+  })
+
+  it('recovers the target document type, including transform output', () => {
+    expectTypeOf<DocumentOf<typeof authors>>().toExtend<{
+      id: string
+      name: string
+      initials: string
+      _meta: DocumentMeta
+    }>()
+  })
+
+  it('falls back to a loose document when a collection is named as a string', () => {
+    expectTypeOf<DocumentOf<'authors'>>().toEqualTypeOf<AnyDocument>()
   })
 })

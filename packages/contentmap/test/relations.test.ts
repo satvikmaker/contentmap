@@ -314,3 +314,139 @@ describe('cache codec', () => {
     expect(out['v']).toBe(1)
   })
 })
+
+
+describe('sibling access', () => {
+  const SIBLINGS = `
+const posts = defineCollection({
+  name: 'posts', directory: 'content/posts', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async (doc, ctx) => ({
+    title: doc.title,
+    related: (await ctx.siblings()).map(s => s.title)
+  })
+})`
+
+  fixtureTest('gives a document the others in its own collection', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}${SIBLINGS}\nexport default defineConfig({ collections: { posts } })`
+    )
+    await fixture.write('content/posts/a.md', '---\ntitle: A\n---\nx')
+    await fixture.write('content/posts/b.md', '---\ntitle: B\n---\nx')
+    await fixture.write('content/posts/c.md', '---\ntitle: C\n---\nx')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors).toBe(0)
+    const a = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(a).toContain('"B"')
+    expect(a).toContain('"C"')
+    // never itself
+    expect(a.match(/"A"/g)).toHaveLength(1)
+  })
+
+  fixtureTest('rebuilds siblings when a document is added', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}${SIBLINGS}\nexport default defineConfig({ collections: { posts } })`
+    )
+    await fixture.write('content/posts/a.md', '---\ntitle: A\n---\nx')
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain(
+      'related: []'
+    )
+
+    await new Promise(r => setTimeout(r, 10))
+    await fixture.write('content/posts/b.md', '---\ntitle: B\n---\nx')
+    await builder.build()
+    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('"B"')
+  })
+
+  fixtureTest('asking for its own collection points at siblings()', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}
+const posts = defineCollection({
+  name: 'posts', directory: 'content/posts', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async (doc, ctx) => ({ title: doc.title, n: (await ctx.documents(posts)).length })
+})
+export default defineConfig({ collections: { posts } })`
+    )
+    await fixture.write('content/posts/a.md', '---\ntitle: A\n---\nx')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    const d = result.diagnostics.find(x => x.code === 'CM_TRANSFORM')
+    expect(d?.file).toBe('a.md')
+    expect(d?.message).toMatch(/cannot read itself/)
+    expect(d?.hint).toMatch(/siblings\(\)/)
+  })
+})
+
+describe('reference() dependency scope', () => {
+  fixtureTest('does not rebuild referrers when only the target content changes', async ({
+    fixture
+  }) => {
+    // reference() keeps an id, not content, so it depends on the target
+    // existing. Tracking content here would rebuild every referrer on any edit
+    // to the target, which is the cost reference() exists to avoid.
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, at: Date.now(), authorId: await ctx.reference(authors, "jane") })')}\nexport default defineConfig({ collections: { authors, posts } })`
+    )
+    await seed(fixture)
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const first = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+
+    await new Promise(r => setTimeout(r, 10))
+    await writeFile(join(fixture.dir, 'content/authors/jane.yaml'), 'name: Jane Renamed')
+    await builder.build()
+    const second = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+
+    expect(second).toBe(first)
+  })
+
+  fixtureTest('still rebuilds when the referenced document disappears', async ({ fixture }) => {
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, authorId: await ctx.reference(authors, "jane") })')}\nexport default defineConfig({ collections: { authors, posts } })`
+    )
+    await seed(fixture)
+    const builder = createBuilder({ root: fixture.dir })
+    expect((await builder.build()).errors).toBe(0)
+
+    await rm(join(fixture.dir, 'content/authors/jane.yaml'))
+    const second = await builder.build()
+    expect(second.errors).toBeGreaterThan(0)
+    expect(second.diagnostics.some(d => d.message.includes('not found'))).toBe(true)
+  })
+})
+
+describe('error fidelity', () => {
+  fixtureTest('resolveMany does not repackage a structural failure', async ({ fixture }) => {
+    // A cycle surfacing through resolveMany must stay a cycle, not be reported
+    // as a missing id.
+    await fixture.write(
+      'contentmap.config.ts',
+      `${head}
+const a = defineCollection({
+  name: 'a', directory: 'content/a', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async (doc, ctx) => ({ title: doc.title, x: await ctx.resolveMany(b, ['y']) })
+})
+const b = defineCollection({
+  name: 'b', directory: 'content/b', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async (doc, ctx) => ({ title: doc.title, x: await ctx.resolveMany(a, ['x']) })
+})
+export default defineConfig({ collections: { a, b } })`
+    )
+    await fixture.write('content/a/x.md', '---\ntitle: X\n---\nx')
+    await fixture.write('content/b/y.md', '---\ntitle: Y\n---\ny')
+
+    await expect(createBuilder({ root: fixture.dir }).build()).rejects.toThrow(/Reference cycle/)
+  })
+})

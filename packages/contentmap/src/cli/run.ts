@@ -129,7 +129,21 @@ const LOCATION_RE = /([^\s():]+\.(?:[cm]?[tj]s|json|ya?ml)):(\d+)(?::(\d+))?/
 async function reportFatal(error: unknown, verbose: boolean): Promise<void> {
   const err = error as Error & { hint?: string; file?: string }
   const message = err?.message ?? String(error)
-  const ours = err instanceof ConfigError
+  // Any error contentmap raises itself knows its own context. Mining a stack
+  // for these prints our dist bundle with a code frame at the user, which is
+  // never what they need to see.
+  const OURS = new Set([
+    'ConfigError',
+    'ReferenceCycleError',
+    'SelfReferenceError',
+    'UnknownCollectionError',
+    'MissingReferenceError',
+    'SerializeError',
+    'MissingRendererError',
+    'MissingImageProcessorError',
+    'OutsideRootError'
+  ])
+  const ours = err instanceof ConfigError || OURS.has(err?.name)
 
   process.stderr.write(`${red('✖')} ${bold(message.split('\n')[0] ?? message)}\n`)
 

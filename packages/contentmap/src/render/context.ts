@@ -57,6 +57,7 @@ export type ImageResolver = (
 /** Everything the builder supplies for relations, caching and file emission. */
 export interface ContextServices {
   documents(collection: CollectionRef): Promise<AnyDocument[]>
+  siblings(): Promise<AnyDocument[]>
   resolve(collection: CollectionRef, id: string): Promise<AnyDocument>
   resolveMany(collection: CollectionRef, ids: readonly string[]): Promise<AnyDocument[]>
   reference(collection: CollectionRef, id: string): Promise<string>
@@ -201,12 +202,11 @@ export function createTransformContext(input: ContextInput): TransformContext {
       throw signal
     },
 
-    documents: <T,>(collection: CollectionRef) =>
-      services().documents(collection) as Promise<T[]>,
-    resolve: <T,>(collection: CollectionRef, id: string) =>
-      services().resolve(collection, id) as Promise<T>,
-    resolveMany: <T,>(collection: CollectionRef, ids: readonly string[]) =>
-      services().resolveMany(collection, ids) as Promise<T[]>,
+    documents: (collection => services().documents(collection)) as TransformContext['documents'],
+    siblings: <T,>() => services().siblings() as Promise<T[]>,
+    resolve: ((collection, id) => services().resolve(collection, id)) as TransformContext['resolve'],
+    resolveMany: ((collection, ids) =>
+      services().resolveMany(collection, ids)) as TransformContext['resolveMany'],
     reference: (collection: CollectionRef, id: string) => services().reference(collection, id),
     cache: <T,>(value: unknown, fn: () => Promise<T> | T, options?: { key?: string }) =>
       services().cache(value, fn, options),
