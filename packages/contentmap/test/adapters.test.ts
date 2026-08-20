@@ -183,6 +183,44 @@ describe('nuxt module', () => {
     expect(nitro.typescript.tsConfig.compilerOptions.paths['contentmap/generated']).toBeDefined()
   })
 
+  it('has a callable default export, which is the only thing Nuxt accepts', async () => {
+    // `modules: ['@contentmap/nuxt']` makes Nuxt import the default export and
+    // invoke it. When that export was the factory, Nuxt called it, took the
+    // module object it returned and threw it away — setup never ran, nothing
+    // was built, and the build died on an unresolvable import that named
+    // nothing relevant. Exporting the object instead is rejected outright with
+    // "is not a function". Every other test in this block calls `.setup()` by
+    // hand and so cannot see any of it.
+    const mod = (await import('../../nuxt/src/index.ts')).default
+
+    expect(typeof mod).toBe('function')
+    expect(mod.getMeta()).toMatchObject({ name: 'contentmap', configKey: 'contentmap' })
+  })
+
+  fixtureTest('is callable the way Nuxt calls it, positionally', async ({ fixture }) => {
+    await seed(fixture)
+    const mod = (await import('../../nuxt/src/index.ts')).default
+    const nuxt = makeNuxt(fixture.dir)
+
+    await mod({ watch: false }, nuxt as never)
+
+    expect(nuxt.options.alias['contentmap/generated']).toContain('.contentmap')
+  })
+
+  fixtureTest('reads options from the `contentmap` config key', async ({ fixture }) => {
+    // Nuxt only merges the config key inside defineNuxtModule's own wrapper,
+    // and depending on @nuxt/kit for that would put a framework in the tree of
+    // a package whose argument is not needing one.
+    await seed(fixture)
+    const mod = (await import('../../nuxt/src/index.ts')).default
+    const nuxt = makeNuxt(fixture.dir)
+    nuxt.options['contentmap'] = { watch: false }
+
+    await mod(undefined, nuxt as never)
+
+    expect(nuxt.hooks).not.toContain('close')
+  })
+
   fixtureTest('does not start a watcher during `nuxt prepare`', async ({ fixture }) => {
     // prepare exists to emit types without building; a watcher leaves it hanging.
     await seed(fixture)

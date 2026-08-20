@@ -5,7 +5,7 @@ import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
  *
  * Nuxt is an optional peer, so this module installs without pulling a major.
  */
-interface NuxtLike {
+export interface NuxtLike {
   options: {
     rootDir: string
     alias: Record<string, string>
@@ -15,9 +15,18 @@ interface NuxtLike {
       typescript?: { tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]> } } }
     }
     typescript?: { tsConfig?: { compilerOptions?: { paths?: Record<string, string[]> } } }
+    /** Whatever the user wrote under the module's config key. */
+    [key: string]: unknown
   }
   hook(name: string, cb: (...args: never[]) => unknown): void
   callHook?(name: string, ...args: unknown[]): Promise<void>
+}
+
+/** Vite accepts either shape for `resolve.alias`; Nuxt may have set either. */
+interface ViteConfigLike {
+  resolve?: {
+    alias?: Record<string, string> | { find: string | RegExp; replacement: string }[]
+  }
 }
 
 export interface NuxtModuleOptions extends BuilderOptions {
@@ -33,16 +42,61 @@ export interface NuxtModuleOptions extends BuilderOptions {
  * Nothing else in this space supports Nuxt at all — the request has been open
  * on content-collections since January 2024.
  */
-export function contentmapModule(options: NuxtModuleOptions = {}) {
-  return {
-    meta: { name: 'contentmap', configKey: 'contentmap' },
-    async setup(_moduleOptions: unknown, nuxt: NuxtLike): Promise<void> {
-      const { watch = true, ...builderOptions } = options
+/** Module metadata, in the shape `@nuxt/kit` produces. */
+export interface ModuleMeta {
+  name: string
+  configKey: string
+}
+
+/**
+ * Nuxt requires a module to be a *function*, and rejects a plain object with
+ * "The Nuxt module @contentmap/nuxt is not a function". `setup` and `meta` stay
+ * on it so the module can also be driven directly.
+ */
+export interface ContentmapNuxtModule {
+  (inlineOptions: NuxtModuleOptions | undefined, nuxt: NuxtLike): Promise<void>
+  getMeta(): ModuleMeta
+  meta: ModuleMeta
+  setup(moduleOptions: NuxtModuleOptions | undefined, nuxt: NuxtLike): Promise<void>
+}
+
+export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNuxtModule {
+  const meta: ModuleMeta = { name: 'contentmap', configKey: 'contentmap' }
+  const self = ((inlineOptions, nuxt) =>
+    self.setup(inlineOptions, nuxt)) as ContentmapNuxtModule
+  self.meta = meta
+  self.getMeta = () => meta
+  Object.assign(self, {
+    meta,
+    async setup(moduleOptions: NuxtModuleOptions | undefined, nuxt: NuxtLike): Promise<void> {
+      // The configKey is only read for us by `defineNuxtModule`, and depending
+      // on @nuxt/kit for that would put a framework in the dependency tree of
+      // a package whose whole argument is not needing one. Precedence runs
+      // config key, then inline options, then the factory argument — each more
+      // specific than the last.
+      const fromConfigKey = (nuxt.options[meta.configKey] ?? {}) as NuxtModuleOptions
+      const { watch = true, ...builderOptions } = { ...fromConfigKey, ...moduleOptions, ...options }
       const builder: Builder = createBuilder({ root: nuxt.options.rootDir, ...builderOptions })
       const config = await builder.resolve()
       const generated = config.output.dir
 
       nuxt.options.alias['contentmap/generated'] = generated
+
+      // Nuxt's own alias map is not enough. `contentmap/generated` looks like a
+      // subpath of a package that really exists, and Vite's resolver consults
+      // the package's `exports` before it consults the alias — so the client
+      // build failed with "./generated is not exported". The generated
+      // directory lives in the user's project, so no exports entry could ever
+      // point at it. Registering on the Vite config directly is what makes the
+      // resolver see it first.
+      nuxt.hook('vite:extendConfig', ((config: ViteConfigLike) => {
+        const resolve = (config.resolve ??= {})
+        if (Array.isArray(resolve.alias)) {
+          resolve.alias.push({ find: 'contentmap/generated', replacement: generated })
+        } else {
+          resolve.alias = { ...resolve.alias, 'contentmap/generated': generated }
+        }
+      }) as never)
 
       // Nitro type-checks separately from the app, so registering the path in
       // the Nuxt tsconfig alone leaves server routes unable to resolve it.
@@ -75,7 +129,23 @@ export function contentmapModule(options: NuxtModuleOptions = {}) {
         await builder.close()
       }
     }
-  }
+  })
+  return self
 }
 
-export default contentmapModule
+/**
+ * The default export has to BE the module, not a factory that returns one.
+ *
+ * `modules: ['@contentmap/nuxt']` makes Nuxt import this and use it directly.
+ * When it was `contentmapModule` itself, Nuxt called it as the module — with
+ * `(inlineOptions, nuxt)` — took the object it returned, and discarded it, so
+ * `setup` never ran: no content built, no alias registered, and a build that
+ * failed on an unresolvable import rather than on anything that named the
+ * cause. Every unit test passed, because they call `contentmapModule().setup()`
+ * by hand. Only a real `nuxt build` exercises the registration path.
+ *
+ * `modules: [contentmapModule({ ... })]` still works for passing options in
+ * code rather than through the `contentmap` config key.
+ */
+const module: ContentmapNuxtModule = contentmapModule()
+export default module
