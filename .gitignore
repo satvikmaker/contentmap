@@ -36,3 +36,6 @@ docs/
 .vite-e2e-*/
 .compare/
 bench-results.json
+
+# copied from the repo root by prepack; never edited in place
+packages/contentmap/README.md
