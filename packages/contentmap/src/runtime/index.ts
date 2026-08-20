@@ -77,7 +77,9 @@ function idOf(row: Record<string, unknown>): string {
 function make<T, K extends keyof T, I extends keyof T>(state: State<T>): Query<T, K, I> {
   const q: Query<T, K, I> = {
     select(...next) {
-      const keys = state.keys ? state.keys.filter(k => (next as string[]).includes(k)) : (next as string[])
+      const keys = state.keys
+        ? state.keys.filter(k => (next as string[]).includes(k))
+        : (next as string[])
       return make({ ...state, keys })
     },
     where(predicate) {

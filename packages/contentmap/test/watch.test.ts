@@ -28,10 +28,7 @@ export default defineConfig({ collections: { posts } })
  */
 const WINDOW = 30_000
 
-const until = async (
-  fn: () => Promise<void> | void,
-  context?: () => string
-): Promise<void> => {
+const until = async (fn: () => Promise<void> | void, context?: () => string): Promise<void> => {
   try {
     await vi.waitFor(fn, { timeout: WINDOW, interval: 25 })
   } catch (error) {
@@ -92,14 +89,14 @@ describe('watch mode', { timeout: 60_000 }, () => {
     try {
       await fixture.write('content/b.md', '---\ntitle: B\n---\nx')
       await until(async () => {
-          const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
-          expect(index).toContain('"b"')
+        const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+        expect(index).toContain('"b"')
       })
 
       await rm(join(fixture.dir, 'content/a.md'))
       await until(async () => {
-          const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
-          expect(index).not.toContain('"a"')
+        const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+        expect(index).not.toContain('"a"')
       })
     } finally {
       await builder.close()
@@ -135,14 +132,11 @@ describe('watch mode', { timeout: 60_000 }, () => {
     await builder.watch({ debounce: 30 })
     try {
       for (let i = 0; i < 20; i++) {
-        await writeFile(
-          join(fixture.dir, `content/p${i}.md`),
-          `---\ntitle: Edited ${i}\n---\nx`
-        )
+        await writeFile(join(fixture.dir, `content/p${i}.md`), `---\ntitle: Edited ${i}\n---\nx`)
       }
       await until(async () => {
-          const doc = await readFile(join(fixture.dir, '.contentmap/posts/p19.js'), 'utf8')
-          expect(doc).toContain('Edited 19')
+        const doc = await readFile(join(fixture.dir, '.contentmap/posts/p19.js'), 'utf8')
+        expect(doc).toContain('Edited 19')
       }, activity)
 
       expect(peak, 'builds must never overlap').toBe(1)
@@ -170,8 +164,8 @@ describe('watch mode', { timeout: 60_000 }, () => {
     try {
       await fixture.write('content/a.md', '---\ntitle: B\n---\nx')
       await until(async () => {
-          const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
-          expect(doc).toContain('"B"')
+        const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+        expect(doc).toContain('"B"')
       })
       // A write can produce more than one filesystem event, so an extra
       // rebuild is not itself a fault — the output is byte-identical and the
@@ -316,7 +310,6 @@ export default defineConfig({ collections: { probe } })
     expect(doc).toContain('entryId')
   })
 })
-
 
 describe('watch mode keeps up with the config', { timeout: 60_000 }, () => {
   fixtureTest('watches a directory a config reload introduced', async ({ fixture }) => {

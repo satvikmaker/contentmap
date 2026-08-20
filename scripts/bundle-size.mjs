@@ -32,9 +32,11 @@ try {
   const r = await createBuilder({ root }).build()
   if (r.errors) throw new Error('build failed')
 
-  const corpus = (await Promise.all(
-    Array.from({ length: N }, (_, i) => readFile(join(root, `content/post-${i}.md`)))
-  )).reduce((n, b) => n + b.length, 0)
+  const corpus = (
+    await Promise.all(
+      Array.from({ length: N }, (_, i) => readFile(join(root, `content/post-${i}.md`)))
+    )
+  ).reduce((n, b) => n + b.length, 0)
 
   await writeFile(
     join(root, 'app.js'),
@@ -55,7 +57,7 @@ try {
   const kb = n => `${(n / 1024).toFixed(1)} KB`
   console.log(`corpus on disk        ${kb(corpus)}  (${N.toLocaleString()} documents)`)
   console.log(`bundled for 10 cards  ${kb(bytes)}  (${kb(gz)} gzip)`)
-  console.log(`ratio                 ${(bytes / corpus * 100).toFixed(1)}% of corpus`)
+  console.log(`ratio                 ${((bytes / corpus) * 100).toFixed(1)}% of corpus`)
   console.log(`content-collections   16,739.5 KB for the same read (measured, issue #784 shape)`)
 
   // The runtime is the only contentmap code that reaches a user's bundle, and

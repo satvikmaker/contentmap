@@ -6,8 +6,7 @@ export interface ValidationIssue {
 }
 
 export type ValidationResult =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; issues: ValidationIssue[] }
+  { ok: true; value: Record<string, unknown> } | { ok: false; issues: ValidationIssue[] }
 
 /**
  * Validate against any Standard Schema implementation — zod, valibot, arktype,

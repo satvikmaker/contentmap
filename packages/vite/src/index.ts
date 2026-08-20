@@ -84,9 +84,7 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
     // Vite's alias plugin reject the whole config.
     async config(userConfig: unknown) {
       const root =
-        builderOptions.root ??
-        (userConfig as { root?: string } | undefined)?.root ??
-        process.cwd()
+        builderOptions.root ?? (userConfig as { root?: string } | undefined)?.root ?? process.cwd()
       const probe = createBuilder({ ...builderOptions, root })
       const resolved = await probe.resolve()
       generatedDir = resolved.output.dir
@@ -131,7 +129,7 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
       // Patch, never replace. SvelteKit sets its own allow list, and
       // overwriting it makes the dev server return 403 for its own files.
       const outDir = generatedDir
-      const fs = (config.server ??= {}).fs ??= {}
+      const fs = ((config.server ??= {}).fs ??= {})
       if (outDir && Array.isArray(fs.allow) && !fs.allow.includes(outDir)) {
         fs.allow.push(outDir)
       }
@@ -162,9 +160,7 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
       const usable = ['on', 'off', 'add', 'unwatch'].every(
         m => typeof (server.watcher as unknown as Record<string, unknown>)[m] === 'function'
       )
-      const handle = await builder.watch(
-        usable ? { watcher: server.watcher as never } : {}
-      )
+      const handle = await builder.watch(usable ? { watcher: server.watcher as never } : {})
 
       builder.on(event => {
         if (event.type !== 'build:end') return
@@ -229,10 +225,16 @@ function invalidate(server: ViteServerLike, generatedDir: string | undefined): v
   }
 
   for (const environment of Object.values(server.environments ?? {})) {
-    const runner = (environment as { runner?: { evaluatedModules?: {
-      getModuleById(id: string): unknown
-      invalidateModule(mod: unknown): void
-    } } }).runner
+    const runner = (
+      environment as {
+        runner?: {
+          evaluatedModules?: {
+            getModuleById(id: string): unknown
+            invalidateModule(mod: unknown): void
+          }
+        }
+      }
+    ).runner
     const evaluated = runner?.evaluatedModules
     const runnerModule = evaluated?.getModuleById(id)
     if (runnerModule) evaluated?.invalidateModule(runnerModule)

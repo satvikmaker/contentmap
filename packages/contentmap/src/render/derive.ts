@@ -28,9 +28,10 @@ const ENTITIES: Record<string, string> = {
 export function decodeEntities(text: string): string {
   return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
     if (body.startsWith('#')) {
-      const code = body[1] === 'x' || body[1] === 'X'
-        ? Number.parseInt(body.slice(2), 16)
-        : Number.parseInt(body.slice(1), 10)
+      const code =
+        body[1] === 'x' || body[1] === 'X'
+          ? Number.parseInt(body.slice(2), 16)
+          : Number.parseInt(body.slice(1), 10)
       return Number.isFinite(code) ? String.fromCodePoint(code) : whole
     }
     return ENTITIES[body.toLowerCase()] ?? whole
@@ -97,7 +98,12 @@ export function buildToc(headings: readonly Heading[], options: TocOptions = {})
 
   for (const heading of headings) {
     if (heading.depth < min || heading.depth > max) continue
-    const entry: TocEntry = { depth: heading.depth, text: heading.text, id: heading.id, children: [] }
+    const entry: TocEntry = {
+      depth: heading.depth,
+      text: heading.text,
+      id: heading.id,
+      children: []
+    }
     while (stack.length > 0 && stack[stack.length - 1]!.depth >= entry.depth) stack.pop()
     const parent = stack[stack.length - 1]
     if (parent) parent.children.push(entry)
@@ -107,8 +113,7 @@ export function buildToc(headings: readonly Heading[], options: TocOptions = {})
   return root
 }
 
-const CJK =
-  /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]/gu
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]/gu
 const WORD = /[\p{L}\p{N}]+(?:['\u2019][\p{L}]+)*/gu
 
 /**

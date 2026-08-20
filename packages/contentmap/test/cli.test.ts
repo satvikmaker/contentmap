@@ -26,7 +26,9 @@ export default defineConfig({ collections: { posts } })
 `
 
 /** Capture what the CLI writes, so assertions read the real output. */
-async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string; err: string }> {
+async function capture(
+  fn: () => Promise<number>
+): Promise<{ code: number; out: string; err: string }> {
   const out: string[] = []
   const err: string[] = []
   const stdout = process.stdout.write.bind(process.stdout)
@@ -77,19 +79,22 @@ describe('phase timing', () => {
 })
 
 describe('cli', () => {
-  fixtureTest('rejects a non-numeric --concurrency instead of passing NaN down', async ({ fixture }) => {
-    await fixture.write('contentmap.config.ts', config(POSTS))
-    await fixture.write('content/a.md', '---\ntitle: A\n---\nBody')
+  fixtureTest(
+    'rejects a non-numeric --concurrency instead of passing NaN down',
+    async ({ fixture }) => {
+      await fixture.write('contentmap.config.ts', config(POSTS))
+      await fixture.write('content/a.md', '---\ntitle: A\n---\nBody')
 
-    // NaN would reach the builder as an unbounded fan-out and blow the
-    // file-descriptor limit on a large corpus.
-    const { code, err } = await capture(() =>
-      run(['build', '--concurrency', 'abc', '--config', `${fixture.dir}/contentmap.config.ts`])
-    )
+      // NaN would reach the builder as an unbounded fan-out and blow the
+      // file-descriptor limit on a large corpus.
+      const { code, err } = await capture(() =>
+        run(['build', '--concurrency', 'abc', '--config', `${fixture.dir}/contentmap.config.ts`])
+      )
 
-    expect(code).toBe(1)
-    expect(err).toContain('--concurrency expects a non-negative number')
-  })
+      expect(code).toBe(1)
+      expect(err).toContain('--concurrency expects a non-negative number')
+    }
+  )
 
   fixtureTest('--verbose prints the phase table it promises', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))
@@ -133,7 +138,10 @@ describe('init', () => {
     // The generated config imports contentmap and zod. Scaffolding a project
     // that cannot build, then failing on the next command with "Cannot find
     // module 'zod'", is a worse first run than one extra line of output.
-    await fixture.write('package.json', JSON.stringify({ name: 'x', dependencies: { next: '^16' } }))
+    await fixture.write(
+      'package.json',
+      JSON.stringify({ name: 'x', dependencies: { next: '^16' } })
+    )
 
     const result = await init({ root: fixture.dir })
 

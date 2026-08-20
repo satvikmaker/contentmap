@@ -364,24 +364,24 @@ export type HasUnserializable<T, Depth extends readonly unknown[] = []> = Depth[
     IsAny<T> extends true
     ? false
     : T extends (...args: never[]) => unknown
-    ? true
-    : T extends symbol
       ? true
-      : T extends Date | RegExp | URL | string | number | boolean | bigint | null | undefined
-        ? false
-        : T extends readonly (infer U)[]
-          ? HasUnserializable<U, [...Depth, 0]>
-          : T extends Map<infer K, infer V>
-            ? HasUnserializable<K | V, [...Depth, 0]>
-            : T extends Set<infer U>
-              ? HasUnserializable<U, [...Depth, 0]>
-              : T extends object
-                ? true extends {
-                    [K in keyof T]-?: HasUnserializable<T[K], [...Depth, 0]>
-                  }[keyof T]
-                  ? true
+      : T extends symbol
+        ? true
+        : T extends Date | RegExp | URL | string | number | boolean | bigint | null | undefined
+          ? false
+          : T extends readonly (infer U)[]
+            ? HasUnserializable<U, [...Depth, 0]>
+            : T extends Map<infer K, infer V>
+              ? HasUnserializable<K | V, [...Depth, 0]>
+              : T extends Set<infer U>
+                ? HasUnserializable<U, [...Depth, 0]>
+                : T extends object
+                  ? true extends {
+                      [K in keyof T]-?: HasUnserializable<T[K], [...Depth, 0]>
+                    }[keyof T]
+                    ? true
+                    : false
                   : false
-                : false
 
 export type EmitFormat = 'modules' | 'bundle' | 'both'
 

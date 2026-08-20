@@ -1,0 +1,8 @@
+dist
+node_modules
+.contentmap
+pnpm-lock.yaml
+examples/*/.next
+examples/*/.nuxt
+examples/*/.output
+examples/*/.astro

@@ -57,7 +57,10 @@ try {
     // Touch one file so exactly one document is stale.
     const target = join(root, `content/post-${run}.md`)
     const now = new Date()
-    await writeFile(target, `---\ntitle: Post ${run} edited\ndate: 2026-01-01\ntags: [a]\n---\n\nedited\n`)
+    await writeFile(
+      target,
+      `---\ntitle: Post ${run} edited\ndate: 2026-01-01\ntags: [a]\n---\n\nedited\n`
+    )
     await utimes(target, now, now)
 
     const t1 = performance.now()
@@ -69,12 +72,15 @@ try {
 
   const rss = process.memoryUsage().rss / 1024 / 1024
   console.log(`corpus      ${N.toLocaleString()} markdown documents (best of ${RUNS})`)
-  console.log(`machine     ${cpus()[0]?.model ?? 'unknown'} / ${availableParallelism()} cores / ${Math.round(totalmem() / 1024 ** 3)}GB / node ${process.version}`)
+  console.log(
+    `machine     ${cpus()[0]?.model ?? 'unknown'} / ${availableParallelism()} cores / ${Math.round(totalmem() / 1024 ** 3)}GB / node ${process.version}`
+  )
   console.log(`cold build  ${coldMs.toFixed(0)}ms   (${cold.documents.toLocaleString()} docs)`)
-  console.log(`rescan      ${warmMs.toFixed(0)}ms   (1 file changed, ${warm.cacheHits.toLocaleString()} cache hits)`)
+  console.log(
+    `rescan      ${warmMs.toFixed(0)}ms   (1 file changed, ${warm.cacheHits.toLocaleString()} cache hits)`
+  )
   console.log(`peak rss    ${rss.toFixed(0)}MB`)
   console.log('phases      cold:', JSON.stringify(coldPhases))
-
 
   // `rescan` re-globs and re-stats the entire corpus, because a bare `build()`
   // cannot know what changed. That floor (~65ms here: glob + 10k stat) is

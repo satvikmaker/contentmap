@@ -68,7 +68,8 @@ export function parseFrontmatterBlock(
   if (raw.trim() === '') return {}
   let parsed: unknown
   try {
-    parsed = format === 'toml' ? parseTOML(raw) : format === 'json' ? parseJSON5(raw) : parseYAML(raw)
+    parsed =
+      format === 'toml' ? parseTOML(raw) : format === 'json' ? parseJSON5(raw) : parseYAML(raw)
   } catch (error) {
     // Translate the block-relative position the parser reports into a
     // file-relative one before it reaches the diagnostic layer.

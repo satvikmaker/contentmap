@@ -29,13 +29,17 @@ export type InferDoc<C, K extends keyof Collections<C> & string> =
       : never
     : never
 
-type HeavyOf<C, K extends keyof Collections<C> & string> =
-  Collections<C>[K] extends { heavy: readonly (infer H)[] }
-    ? H & string
-    : 'content' | 'html' | 'mdx' | 'body' | 'raw'
+type HeavyOf<C, K extends keyof Collections<C> & string> = Collections<C>[K] extends {
+  heavy: readonly (infer H)[]
+}
+  ? H & string
+  : 'content' | 'html' | 'mdx' | 'body' | 'raw'
 
-type IndexListOf<C, K extends keyof Collections<C> & string> =
-  Collections<C>[K] extends { index: readonly (infer I)[] } ? I & string : never
+type IndexListOf<C, K extends keyof Collections<C> & string> = Collections<C>[K] extends {
+  index: readonly (infer I)[]
+}
+  ? I & string
+  : never
 
 /**
  * The index type.
@@ -48,8 +52,8 @@ type IndexListOf<C, K extends keyof Collections<C> & string> =
  * field would shadow a user's own `id` (authors commonly declare one) and would
  * not be a member of the document type, breaking `Query<T, K extends keyof T>`.
  */
-export type InferIndex<C, K extends keyof Collections<C> & string> = [
-  IndexListOf<C, K>
-] extends [never]
+export type InferIndex<C, K extends keyof Collections<C> & string> = [IndexListOf<C, K>] extends [
+  never
+]
   ? Omit<InferDoc<C, K>, HeavyOf<C, K>>
   : Pick<InferDoc<C, K>, (IndexListOf<C, K> | '_meta') & keyof InferDoc<C, K>>

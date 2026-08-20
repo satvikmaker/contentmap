@@ -45,8 +45,8 @@ const posts = defineCollection({
     return {
       ...doc,
       slug: ctx.meta.slug,
-      cover: await ctx.image(doc.cover),        // dimensions + a placeholder
-      author: await ctx.resolve(authors, doc.author),  // joined, checked at build time
+      cover: await ctx.image(doc.cover), // dimensions + a placeholder
+      author: await ctx.resolve(authors, doc.author), // joined, checked at build time
       html: await ctx.markdown(),
       reading: await ctx.readingTime()
     }
@@ -64,15 +64,15 @@ import { posts } from 'contentmap/generated'
 
 const cards = posts
   .where({ draft: false })
-  .select('title', 'slug', 'cover')   // → Pick<Post, 'title' | 'slug' | 'cover'>[]
+  .select('title', 'slug', 'cover') // → Pick<Post, 'title' | 'slug' | 'cover'>[]
   .sortBy('date', 'desc')
   .limit(10)
   .all()
 
-cards[0].cover.placeholder   // ✅ generated at build time, zero client JS
-cards[0].author              // ✗ compile error — not selected
+cards[0].cover.placeholder // ✅ generated at build time, zero client JS
+cards[0].author // ✗ compile error — not selected
 
-const full = await posts.load('hello-world')   // bundles ONE document
+const full = await posts.load('hello-world') // bundles ONE document
 ```
 
 ## Why
@@ -87,27 +87,27 @@ All three emit **one array literal per collection**. That single decision is why
 
 ## What is different
 
-| | |
-|---|---|
-| **Correct by default** | A green build cannot have silently dropped data. CI builds 3,000 documents under `ulimit -n 64` and fails if the build exits 0 with a truncated corpus |
-| **Per-document output** | Read one post, bundle one post. Free code-splitting, fine-grained HMR, Turbopack compatibility |
-| **Typed projections** | `select('title','date')` narrows to `Pick<Post, …>`. The only file-based tool where the query is part of the type surface |
-| **Validator-agnostic** | zod, valibot, arktype, effect — all four tested for identical behaviour. No validator in our dependency tree |
-| **CLI-first** | `contentmap build` is the product. CI asserts the Vite plugin's output is byte-identical to the CLI's |
-| **Local and remote** | Markdown, MDX, YAML, JSON, JSONC, TOML — plus HTTP endpoints through the same schema, cache and type pipeline |
+|                         |                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Correct by default**  | A green build cannot have silently dropped data. CI builds 3,000 documents under `ulimit -n 64` and fails if the build exits 0 with a truncated corpus |
+| **Per-document output** | Read one post, bundle one post. Free code-splitting, fine-grained HMR, Turbopack compatibility                                                         |
+| **Typed projections**   | `select('title','date')` narrows to `Pick<Post, …>`. The only file-based tool where the query is part of the type surface                              |
+| **Validator-agnostic**  | zod, valibot, arktype, effect — all four tested for identical behaviour. No validator in our dependency tree                                           |
+| **CLI-first**           | `contentmap build` is the product. CI asserts the Vite plugin's output is byte-identical to the CLI's                                                  |
+| **Local and remote**    | Markdown, MDX, YAML, JSON, JSONC, TOML — plus HTTP endpoints through the same schema, cache and type pipeline                                          |
 
 ## Measured against the alternatives
 
 One corpus of 1,000 markdown documents, every tool configured for frontmatter parsing plus schema validation. Reproduce with `pnpm bench:compare`.
 
-| | packages | install size | files emitted |
-|---|---|---|---|
-| **contentmap** | **10** | **7.0 MB** | 1,004 |
-| velite | 131 | 54.6 MB | 3 |
-| content-collections | 41 | 62.7 MB | 4 |
-| contentlayer2 | 287 | 134.0 MB | 1,009 |
+|                     | packages | install size | files emitted |
+| ------------------- | -------- | ------------ | ------------- |
+| **contentmap**      | **10**   | **7.0 MB**   | 1,004         |
+| velite              | 131      | 54.6 MB      | 3             |
+| content-collections | 41       | 62.7 MB      | 4             |
+| contentlayer2       | 287      | 134.0 MB     | 1,009         |
 
-*(Includes zod, which contentmap and content-collections both need. contentmap alone is 9 packages / 2.6 MB.)*
+_(Includes zod, which contentmap and content-collections both need. contentmap alone is 9 packages / 2.6 MB.)_
 
 Two honest notes on this table.
 
@@ -117,14 +117,14 @@ Two honest notes on this table.
 
 ## Framework setup
 
-| Framework | Package | Setup | Proven by |
-|---|---|---|---|
-| Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start, Analog | `@contentmap/vite` | add `contentmap()` to `plugins` | a real `vite build` |
-| Next.js (Turbopack and webpack) | `@contentmap/next` | wrap with `withContentmap()` | [`examples/next`](examples/next) |
-| Nuxt | `@contentmap/nuxt` | add to `modules` | [`examples/nuxt`](examples/nuxt) |
-| Astro | `@contentmap/astro` | use `contentmapLoader()` as a collection loader | [`examples/astro`](examples/astro) |
-| webpack / Rspack | `@contentmap/webpack` | add `new ContentmapWebpackPlugin()` | [`examples/webpack`](examples/webpack) |
-| Angular CLI | — | no plugin array exists; run `contentmap build` from `prebuild` | not yet |
+| Framework                                                               | Package               | Setup                                                          | Proven by                              |
+| ----------------------------------------------------------------------- | --------------------- | -------------------------------------------------------------- | -------------------------------------- |
+| Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start, Analog | `@contentmap/vite`    | add `contentmap()` to `plugins`                                | a real `vite build`                    |
+| Next.js (Turbopack and webpack)                                         | `@contentmap/next`    | wrap with `withContentmap()`                                   | [`examples/next`](examples/next)       |
+| Nuxt                                                                    | `@contentmap/nuxt`    | add to `modules`                                               | [`examples/nuxt`](examples/nuxt)       |
+| Astro                                                                   | `@contentmap/astro`   | use `contentmapLoader()` as a collection loader                | [`examples/astro`](examples/astro)     |
+| webpack / Rspack                                                        | `@contentmap/webpack` | add `new ContentmapWebpackPlugin()`                            | [`examples/webpack`](examples/webpack) |
+| Angular CLI                                                             | —                     | no plugin array exists; run `contentmap build` from `prebuild` | not yet                                |
 
 Every adapter is a convenience. `contentmap build` produces identical output, and CI proves it — which is what keeps the tool alive when a bundler drops plugin support, as Turbopack did to Contentlayer.
 

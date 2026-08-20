@@ -146,16 +146,16 @@ describe('correctness guarantees', () => {
   fixtureTest.skipIf(process.platform === 'win32')(
     'reports read failures rather than silently dropping them',
     async ({ fixture }) => {
-    await fixture.write('contentmap.config.ts', config(POSTS))
-    await fixture.write('content/ok.md', '---\ntitle: OK\ndate: 2026-01-01\n---\nx')
-    // An unreadable file matches the glob but fails to read — the same shape as
-    // the fd-exhaustion case that cost content-collections 92% of a corpus.
-    const locked = await fixture.write('content/locked.md', '---\ntitle: L\n---\nx')
-    await chmod(locked, 0o000)
+      await fixture.write('contentmap.config.ts', config(POSTS))
+      await fixture.write('content/ok.md', '---\ntitle: OK\ndate: 2026-01-01\n---\nx')
+      // An unreadable file matches the glob but fails to read — the same shape as
+      // the fd-exhaustion case that cost content-collections 92% of a corpus.
+      const locked = await fixture.write('content/locked.md', '---\ntitle: L\n---\nx')
+      await chmod(locked, 0o000)
 
-    const result = await createBuilder({ root: fixture.dir }).build()
-    expect(result.errors).toBeGreaterThan(0)
-    expect(result.diagnostics.some(d => d.code === 'CM_READ')).toBe(true)
+      const result = await createBuilder({ root: fixture.dir }).build()
+      expect(result.errors).toBeGreaterThan(0)
+      expect(result.diagnostics.some(d => d.code === 'CM_READ')).toBe(true)
     }
   )
 
@@ -173,10 +173,7 @@ describe('correctness guarantees', () => {
     // output — the silent-wrong-answer failure this project exists to avoid.
     // Size comes free from the same stat and catches it.
     await fixture.write('contentmap.config.ts', config(POSTS))
-    const doc = await fixture.write(
-      'content/a.md',
-      '---\ntitle: Before\ndate: 2026-01-01\n---\nx'
-    )
+    const doc = await fixture.write('content/a.md', '---\ntitle: Before\ndate: 2026-01-01\n---\nx')
     await utimes(doc, PINNED, PINNED)
 
     const builder = createBuilder({ root: fixture.dir })
@@ -267,7 +264,9 @@ export default defineConfig({ collections: { post, posts } })`)
 const a = defineCollection({ name: 'my-posts', directory: 'content', include: '*.md', schema: z.object({ t: z.string() }) })
 export default defineConfig({ collections: { a } })`)
     )
-    await expect(createBuilder({ root: fixture.dir }).build()).rejects.toThrow(/valid JavaScript identifier/)
+    await expect(createBuilder({ root: fixture.dir }).build()).rejects.toThrow(
+      /valid JavaScript identifier/
+    )
   })
 
   fixtureTest('rejects a schema that is not a Standard Schema', async ({ fixture }) => {
@@ -285,8 +284,8 @@ export default defineConfig({ collections: { a } })`)
     // parent's config.
     await fixture.write('contentmap.config.ts', config(POSTS))
     await fixture.write('nested/app/.keep', '')
-    await expect(
-      createBuilder({ root: join(fixture.dir, 'nested/app') }).build()
-    ).rejects.toThrow(ConfigError)
+    await expect(createBuilder({ root: join(fixture.dir, 'nested/app') }).build()).rejects.toThrow(
+      ConfigError
+    )
   })
 })

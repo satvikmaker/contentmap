@@ -12,7 +12,9 @@ export interface NuxtLike {
     /** True during `nuxt prepare`: generate types, build nothing. */
     _prepare?: boolean
     nitro: {
-      typescript?: { tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]> } } }
+      typescript?: {
+        tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]> } }
+      }
     }
     typescript?: { tsConfig?: { compilerOptions?: { paths?: Record<string, string[]> } } }
   }
@@ -53,8 +55,7 @@ export interface ContentmapNuxtModule {
 
 export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNuxtModule {
   const meta: ModuleMeta = { name: 'contentmap', configKey: 'contentmap' }
-  const self = ((inlineOptions, nuxt) =>
-    self.setup(inlineOptions, nuxt)) as ContentmapNuxtModule
+  const self = ((inlineOptions, nuxt) => self.setup(inlineOptions, nuxt)) as ContentmapNuxtModule
   self.meta = meta
   self.getMeta = () => meta
   Object.assign(self, {
@@ -75,7 +76,6 @@ export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNux
       const generated = config.output.dir
 
       nuxt.options.alias['contentmap/generated'] = generated
-
 
       // Nitro type-checks separately from the app, so registering the path in
       // the Nuxt tsconfig alone leaves server routes unable to resolve it.

@@ -155,8 +155,7 @@ export async function emitCollection({
     const doc = entries[0]
     const body = doc === undefined ? 'undefined' : serialize(splitFields(doc, collection).full)
     const source =
-      `${BANNER}export const ${collection.name} = ${body}\n` +
-      `export default ${collection.name}\n`
+      `${BANNER}export const ${collection.name} = ${body}\n` + `export default ${collection.name}\n`
     await emit(join(dir, 'index.js'), source, stats)
     await removeOrphans(dir, present, new Set(), stats)
     return
@@ -219,10 +218,7 @@ export async function emitCollection({
       // Output is a pure function of the source, so an unchanged source digest
       // means unchanged output. Skipping serialize here keeps an incremental
       // rebuild proportional to what changed, not to corpus size.
-      if (
-        stats.sources.get(item.path) === item.entry.emitKey &&
-        present.has(basename(item.path))
-      ) {
+      if (stats.sources.get(item.path) === item.entry.emitKey && present.has(basename(item.path))) {
         stats.skipped++
         return
       }
@@ -310,9 +306,7 @@ export async function emitTypes(config: ResolvedConfig, stats: EmitStats): Promi
       lines.push(`export declare const ${name}: ${type}\n\n`)
       continue
     }
-    lines.push(
-      `export type ${type}Index = InferIndex<typeof __config, ${JSON.stringify(name)}>\n`
-    )
+    lines.push(`export type ${type}Index = InferIndex<typeof __config, ${JSON.stringify(name)}>\n`)
     lines.push(`export declare const ${name}: Query<${type}, keyof ${type}Index>\n\n`)
   }
   lines.push('export {}\n')

@@ -48,8 +48,12 @@ try {
   console.log(`corpus            ${N.toLocaleString()} documents, best of 5`)
   console.log(`load              ${loadavg()[0].toFixed(1)} on ${availableParallelism()} cores`)
   console.log(`rescan (no hint)  ${blind.toFixed(0)}ms total, discovery ${blindRead.toFixed(0)}ms`)
-  console.log(`watch (1 changed) ${watched.toFixed(0)}ms total, discovery ${watchedRead.toFixed(0)}ms`)
-  console.log(`discovery saved   ${(blindRead - watchedRead).toFixed(0)}ms (the stat pass the watcher makes unnecessary)`)
+  console.log(
+    `watch (1 changed) ${watched.toFixed(0)}ms total, discovery ${watchedRead.toFixed(0)}ms`
+  )
+  console.log(
+    `discovery saved   ${(blindRead - watchedRead).toFixed(0)}ms (the stat pass the watcher makes unnecessary)`
+  )
   const noisy = loadavg()[0] > availableParallelism() * 0.7
   if (noisy) console.log('!  machine busy; timings unreliable')
   else console.log(`${watched < 50 ? 'PASS' : 'FAIL'}  watch rebuild < 50ms`)

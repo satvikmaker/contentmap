@@ -8,7 +8,10 @@ describe('init', () => {
   fixtureTest('scaffolds a project and registers the path alias', async ({ fixture }) => {
     // Editing tsconfig by hand is the step people most often miss, and every
     // bundler here resolves generated output through it.
-    await fixture.write('package.json', JSON.stringify({ name: 'x', dependencies: { next: '^16' } }))
+    await fixture.write(
+      'package.json',
+      JSON.stringify({ name: 'x', dependencies: { next: '^16' } })
+    )
     await fixture.write('tsconfig.json', '{\n  "compilerOptions": {\n    "strict": true\n  }\n}\n')
 
     const result = await init({ root: fixture.dir })
@@ -36,7 +39,9 @@ describe('init', () => {
 
     const forced = await init({ root: fixture.dir, force: true })
     expect(forced.created).toContain('contentmap.config.ts')
-    expect(await readFile(join(fixture.dir, 'contentmap.config.ts'), 'utf8')).toContain('defineConfig')
+    expect(await readFile(join(fixture.dir, 'contentmap.config.ts'), 'utf8')).toContain(
+      'defineConfig'
+    )
   })
 
   fixtureTest('is idempotent', async ({ fixture }) => {

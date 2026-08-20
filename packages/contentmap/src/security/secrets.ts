@@ -41,7 +41,8 @@ const PATTERNS: readonly Pattern[] = [
   { test: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./, reason: 'looks like a JWT' }
 ]
 
-const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|API_KEY|APIKEY|AUTH)/i
+const SECRET_NAME =
+  /(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|API_KEY|APIKEY|AUTH)/i
 
 /** Environment values worth protecting, longest first so the longest wins. */
 function secretEnvValues(): string[] {

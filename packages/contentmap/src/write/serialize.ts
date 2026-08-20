@@ -85,7 +85,9 @@ function write(
     }
     if (value instanceof Set) {
       if (value.size === 0) return 'new Set()'
-      const items = [...value].map((v, i) => pad + write(v, indent, depth + 1, seen, `${path}[${i}]`))
+      const items = [...value].map(
+        (v, i) => pad + write(v, indent, depth + 1, seen, `${path}[${i}]`)
+      )
       return `new Set([\n${items.join(',\n')}\n${close}])`
     }
 

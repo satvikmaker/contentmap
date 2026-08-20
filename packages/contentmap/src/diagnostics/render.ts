@@ -49,7 +49,9 @@ export function renderDiagnostics(bag: DiagnosticBag, options: RenderOptions): s
 
   // Count the corpus, not the survivors: "0 documents" when everything failed
   // reads as though nothing was even scanned.
-  const affected = new Set(items.filter(d => d.file ?? d.documentId).map(d => d.file ?? d.documentId)).size
+  const affected = new Set(
+    items.filter(d => d.file ?? d.documentId).map(d => d.file ?? d.documentId)
+  ).size
   const ok = Math.max(0, options.total - affected)
 
   // An `info`-only report is not a warning. Announcing "0 errors, 0 warnings"
@@ -63,8 +65,14 @@ export function renderDiagnostics(bag: DiagnosticBag, options: RenderOptions): s
 
   const lines: string[] = [
     icon +
-      ' contentmap ' + dim('\u2014') + ' ' + counts + ' ' +
-      'in ' + plural(options.total, 'document') + ' ' +
+      ' contentmap ' +
+      dim('\u2014') +
+      ' ' +
+      counts +
+      ' ' +
+      'in ' +
+      plural(options.total, 'document') +
+      ' ' +
       dim('(' + ok.toLocaleString() + ' ok)'),
     ''
   ]

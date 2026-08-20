@@ -32,7 +32,10 @@ try {
   ].join('\n')
   await Promise.all(
     Array.from({ length: N }, (_, i) =>
-      writeFile(join(root, `content/p-${i}.md`), `---\ntitle: Post ${i}\n---\n\n# Post ${i}\n\n${body.repeat(3)}`)
+      writeFile(
+        join(root, `content/p-${i}.md`),
+        `---\ntitle: Post ${i}\n---\n\n# Post ${i}\n\n${body.repeat(3)}`
+      )
     )
   )
 
@@ -42,16 +45,34 @@ ${rendererImport}
 import { z } from 'zod'
 const posts = defineCollection({
   name: 'posts', directory: 'content', include: '**/*.md',
-  schema: z.object({ title: z.string(), content: z.string() })${call ? `,
-  transform: async (doc, ctx) => ({ title: doc.title, html: await ctx.markdown(), reading: await ctx.readingTime() })` : ''}
+  schema: z.object({ title: z.string(), content: z.string() })${
+    call
+      ? `,
+  transform: async (doc, ctx) => ({ title: doc.title, html: await ctx.markdown(), reading: await ctx.readingTime() })`
+      : ''
+  }
 })
 export default defineConfig({ collections: { posts }${call ? `, renderer: ${call}` : ''} })
 `
 
   const CASES = [
     ['no renderer  ', config('', null), undefined],
-    ['marked       ', config(`import { markdown } from '${process.cwd()}/packages/markdown/src/index.ts'`, 'markdown()'), markdown()],
-    ['unified      ', config(`import { unifiedRenderer } from '${process.cwd()}/packages/unified/src/index.ts'`, 'unifiedRenderer()'), unifiedRenderer()]
+    [
+      'marked       ',
+      config(
+        `import { markdown } from '${process.cwd()}/packages/markdown/src/index.ts'`,
+        'markdown()'
+      ),
+      markdown()
+    ],
+    [
+      'unified      ',
+      config(
+        `import { unifiedRenderer } from '${process.cwd()}/packages/unified/src/index.ts'`,
+        'unifiedRenderer()'
+      ),
+      unifiedRenderer()
+    ]
   ]
 
   console.log(`corpus  ${N.toLocaleString()} markdown documents, best of ${RUNS}`)
@@ -69,7 +90,10 @@ export default defineConfig({ collections: { posts }${call ? `, renderer: ${call
       const r = await b.build()
       const ms = performance.now() - t
       if (r.errors) throw new Error(`${label}: ${r.errors} errors`)
-      if (ms < best) { best = ms; phases = Object.fromEntries(Object.entries(b.phases).map(([k, v]) => [k, Math.round(v)])) }
+      if (ms < best) {
+        best = ms
+        phases = Object.fromEntries(Object.entries(b.phases).map(([k, v]) => [k, Math.round(v)]))
+      }
     }
     results.push([label, best, phases])
   }
@@ -90,8 +114,12 @@ export default defineConfig({ collections: { posts }${call ? `, renderer: ${call
 
   const markedCost = results[1][1] - base
   const unifiedCost = results[2][1] - base
-  console.log(`\nrendering share of build: marked ${((markedCost / results[1][1]) * 100).toFixed(1)}%, unified ${((unifiedCost / results[2][1]) * 100).toFixed(1)}%`)
-  console.log(`a hypothetical 100x-faster renderer would save at most ${Math.round(markedCost)}ms of ${Math.round(results[1][1])}ms`)
+  console.log(
+    `\nrendering share of build: marked ${((markedCost / results[1][1]) * 100).toFixed(1)}%, unified ${((unifiedCost / results[2][1]) * 100).toFixed(1)}%`
+  )
+  console.log(
+    `a hypothetical 100x-faster renderer would save at most ${Math.round(markedCost)}ms of ${Math.round(results[1][1])}ms`
+  )
 } finally {
   await rm(root, { recursive: true, force: true })
 }

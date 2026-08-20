@@ -25,17 +25,29 @@ async function countPackages(nodeModules) {
 
   const sizeOf = async p => {
     let entries
-    try { entries = await readdir(p, { withFileTypes: true }) } catch { return }
+    try {
+      entries = await readdir(p, { withFileTypes: true })
+    } catch {
+      return
+    }
     for (const e of entries) {
       const child = join(p, e.name)
       if (e.isDirectory()) await sizeOf(child)
-      else { try { bytes += (await stat(child)).size } catch {} }
+      else {
+        try {
+          bytes += (await stat(child)).size
+        } catch {}
+      }
     }
   }
 
   const walk = async dir => {
     let entries
-    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue
       const child = join(dir, e.name)

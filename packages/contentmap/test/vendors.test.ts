@@ -35,8 +35,7 @@ const VENDORS = [
   {
     name: 'effect',
     imports: `import { Schema } from 'effect'`,
-    schema:
-      `Schema.standardSchemaV1(Schema.Struct({ title: Schema.String, nested: Schema.Struct({ deep: Schema.String }) }))`
+    schema: `Schema.standardSchemaV1(Schema.Struct({ title: Schema.String, nested: Schema.Struct({ deep: Schema.String }) }))`
   }
 ] as const
 

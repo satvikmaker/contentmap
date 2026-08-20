@@ -79,7 +79,10 @@ describe('cross-collection references', () => {
       `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, authors: await ctx.resolveMany(authors, doc.authors ?? []) })')}\nexport default defineConfig({ collections: { authors, posts } })`
     )
     await seed(fixture)
-    await fixture.write('content/posts/list.md', '---\ntitle: L\nauthors: [jane, ghost, phantom]\n---\nx')
+    await fixture.write(
+      'content/posts/list.md',
+      '---\ntitle: L\nauthors: [jane, ghost, phantom]\n---\nx'
+    )
 
     const result = await createBuilder({ root: fixture.dir }).build()
     expect(result.errors).toBeGreaterThan(0)
@@ -188,22 +191,29 @@ describe('reverse invalidation', () => {
     )
   })
 
-  fixtureTest('adding a document invalidates anyone reading the collection', async ({ fixture }) => {
-    await fixture.write(
-      'contentmap.config.ts',
-      `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, count: (await ctx.documents(authors)).length })')}\nexport default defineConfig({ collections: { authors, posts } })`
-    )
-    await seed(fixture)
+  fixtureTest(
+    'adding a document invalidates anyone reading the collection',
+    async ({ fixture }) => {
+      await fixture.write(
+        'contentmap.config.ts',
+        `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, count: (await ctx.documents(authors)).length })')}\nexport default defineConfig({ collections: { authors, posts } })`
+      )
+      await seed(fixture)
 
-    const builder = createBuilder({ root: fixture.dir })
-    await builder.build()
-    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('count: 2')
+      const builder = createBuilder({ root: fixture.dir })
+      await builder.build()
+      expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain(
+        'count: 2'
+      )
 
-    await new Promise(r => setTimeout(r, 10))
-    await fixture.write('content/authors/zoe.yaml', 'name: Zoe')
-    await builder.build()
-    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('count: 3')
-  })
+      await new Promise(r => setTimeout(r, 10))
+      await fixture.write('content/authors/zoe.yaml', 'name: Zoe')
+      await builder.build()
+      expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain(
+        'count: 3'
+      )
+    }
+  )
 })
 
 describe('transform cache', () => {
@@ -268,18 +278,22 @@ const posts = defineCollection({
     )
     await fixture.write('content/posts/a.md', '---\ntitle: A\n---\nx')
     await createBuilder({ root: fixture.dir }).build()
-    const before = await readFile(join(fixture.dir, '.contentmap/.cache/transforms/posts.json'), 'utf8')
+    const before = await readFile(
+      join(fixture.dir, '.contentmap/.cache/transforms/posts.json'),
+      'utf8'
+    )
 
     await fixture.write(
       'contentmap.config.ts',
       `${head}${CACHED.replace('n: 42', 'n: 99')}\nexport default defineConfig({ collections: { posts } })`
     )
     await createBuilder({ root: fixture.dir }).build()
-    const after = await readFile(join(fixture.dir, '.contentmap/.cache/transforms/posts.json'), 'utf8')
+    const after = await readFile(
+      join(fixture.dir, '.contentmap/.cache/transforms/posts.json'),
+      'utf8'
+    )
     expect(after).not.toBe(before)
-    expect(
-      await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
-    ).toContain('n: 99')
+    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('n: 99')
   })
 })
 
@@ -309,12 +323,14 @@ describe('cache codec', () => {
   })
 
   it('does not mistake a plain object with a $ key for a tag', () => {
-    const out = decode(JSON.parse(JSON.stringify(encode({ $: 'not-a-tag', v: 1 })))) as Record<string, unknown>
+    const out = decode(JSON.parse(JSON.stringify(encode({ $: 'not-a-tag', v: 1 })))) as Record<
+      string,
+      unknown
+    >
     expect(out['$']).toBe('not-a-tag')
     expect(out['v']).toBe(1)
   })
 })
-
 
 describe('sibling access', () => {
   const SIBLINGS = `
@@ -385,29 +401,30 @@ export default defineConfig({ collections: { posts } })`
 })
 
 describe('reference() dependency scope', () => {
-  fixtureTest('does not rebuild referrers when only the target content changes', async ({
-    fixture
-  }) => {
-    // reference() keeps an id, not content, so it depends on the target
-    // existing. Tracking content here would rebuild every referrer on any edit
-    // to the target, which is the cost reference() exists to avoid.
-    await fixture.write(
-      'contentmap.config.ts',
-      `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, at: Date.now(), authorId: await ctx.reference(authors, "jane") })')}\nexport default defineConfig({ collections: { authors, posts } })`
-    )
-    await seed(fixture)
+  fixtureTest(
+    'does not rebuild referrers when only the target content changes',
+    async ({ fixture }) => {
+      // reference() keeps an id, not content, so it depends on the target
+      // existing. Tracking content here would rebuild every referrer on any edit
+      // to the target, which is the cost reference() exists to avoid.
+      await fixture.write(
+        'contentmap.config.ts',
+        `${head}${AUTHORS}${POSTS('async (doc, ctx) => ({ title: doc.title, at: Date.now(), authorId: await ctx.reference(authors, "jane") })')}\nexport default defineConfig({ collections: { authors, posts } })`
+      )
+      await seed(fixture)
 
-    const builder = createBuilder({ root: fixture.dir })
-    await builder.build()
-    const first = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+      const builder = createBuilder({ root: fixture.dir })
+      await builder.build()
+      const first = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
 
-    await new Promise(r => setTimeout(r, 10))
-    await writeFile(join(fixture.dir, 'content/authors/jane.yaml'), 'name: Jane Renamed')
-    await builder.build()
-    const second = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+      await new Promise(r => setTimeout(r, 10))
+      await writeFile(join(fixture.dir, 'content/authors/jane.yaml'), 'name: Jane Renamed')
+      await builder.build()
+      const second = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
 
-    expect(second).toBe(first)
-  })
+      expect(second).toBe(first)
+    }
+  )
 
   fixtureTest('still rebuilds when the referenced document disappears', async ({ fixture }) => {
     await fixture.write(

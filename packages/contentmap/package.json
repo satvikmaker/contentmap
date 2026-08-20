@@ -11,14 +11,26 @@
   },
   "bugs": "https://github.com/satvikmaker/contentmap/issues",
   "homepage": "https://github.com/satvikmaker/contentmap#readme",
-  "engines": { "node": "^22.11.0 || >=24" },
-  "bin": { "contentmap": "./dist/cli.js" },
+  "engines": {
+    "node": "^22.11.0 || >=24"
+  },
+  "bin": {
+    "contentmap": "./dist/cli.js"
+  },
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./runtime": { "types": "./dist/runtime/index.d.ts", "default": "./dist/runtime/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsdown",
@@ -33,6 +45,12 @@
     "jiti": "^2.7.0",
     "tinyglobby": "^0.2.17"
   },
-  "peerDependencies": { "typescript": "^5.0.0 || ^6.0.0 || ^7.0.0" },
-  "peerDependenciesMeta": { "typescript": { "optional": true } }
+  "peerDependencies": {
+    "typescript": "^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  }
 }

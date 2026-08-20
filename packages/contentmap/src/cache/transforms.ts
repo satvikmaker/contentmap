@@ -101,7 +101,8 @@ export class TransformCache {
     for (const [collection, data] of this.#next) {
       const before = this.#loaded.get(collection)
       const changed =
-        this.#dirty.has(collection) || before === undefined ||
+        this.#dirty.has(collection) ||
+        before === undefined ||
         stableStringify(before) !== stableStringify(data)
       if (!changed) continue
       await mkdir(this.#dir, { recursive: true })

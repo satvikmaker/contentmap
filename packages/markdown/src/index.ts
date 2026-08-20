@@ -70,8 +70,9 @@ function headingIdExtension(): MarkedExtension {
         const text = stripInline(token.text)
         const id = uniqueSlug(text, seen)
         // `this.parser` renders inline markup inside the heading.
-        const inner = (this as unknown as { parser: { parseInline(t: unknown): string } }).parser
-          .parseInline(token.tokens)
+        const inner = (
+          this as unknown as { parser: { parseInline(t: unknown): string } }
+        ).parser.parseInline(token.tokens)
         return `<h${token.depth} id="${escapeAttr(id)}">${inner}</h${token.depth}>\n`
       }
     }

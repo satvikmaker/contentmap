@@ -89,7 +89,11 @@ describe('vite plugin', () => {
     // SvelteKit sets its own allow list; overwriting it makes the dev server
     // return 403 for its own files.
     await seed(fixture)
-    const viteConfig = { root: fixture.dir, command: 'build' as const, server: { fs: { allow: ['/existing'] } } }
+    const viteConfig = {
+      root: fixture.dir,
+      command: 'build' as const,
+      server: { fs: { allow: ['/existing'] } }
+    }
     const plugin = vitePlugin()
     await plugin.config?.({ root: fixture.dir })
     await plugin.configResolved?.(viteConfig)
@@ -177,8 +181,12 @@ describe('nuxt module', () => {
     await contentmapModule({ watch: false }).setup({}, nuxt as never)
 
     expect(nuxt.options.alias['contentmap/generated']).toContain('.contentmap')
-    const app = (nuxt.options.typescript as never as { tsConfig: { compilerOptions: { paths: Record<string, string[]> } } })
-    const nitro = (nuxt.options.nitro as never as { typescript: { tsConfig: { compilerOptions: { paths: Record<string, string[]> } } } })
+    const app = nuxt.options.typescript as never as {
+      tsConfig: { compilerOptions: { paths: Record<string, string[]> } }
+    }
+    const nitro = nuxt.options.nitro as never as {
+      typescript: { tsConfig: { compilerOptions: { paths: Record<string, string[]> } } }
+    }
     expect(app.tsConfig.compilerOptions.paths['contentmap/generated']).toBeDefined()
     expect(nitro.typescript.tsConfig.compilerOptions.paths['contentmap/generated']).toBeDefined()
   })
@@ -241,7 +249,9 @@ describe('webpack plugin', () => {
     const taps: (() => Promise<void>)[] = []
     plugin.apply({
       ...compiler,
-      hooks: { beforeCompile: { tapPromise: (_n: string, fn: () => Promise<void>) => taps.push(fn) } }
+      hooks: {
+        beforeCompile: { tapPromise: (_n: string, fn: () => Promise<void>) => taps.push(fn) }
+      }
     } as never)
     for (const tap of taps) await tap()
   }
@@ -252,7 +262,9 @@ describe('webpack plugin', () => {
     // looks enough like a real package subpath that the failure is "Module not
     // found", which points at nothing.
     await seed(fixture)
-    const compiler = { options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } } }
+    const compiler = {
+      options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } }
+    }
 
     await runBeforeCompile(new ContentmapWebpackPlugin({ root: fixture.dir }), compiler)
 
@@ -273,7 +285,9 @@ describe('webpack plugin', () => {
       )
     )
     await fixture.write('content/a.md', '---\ntitle: A\n---\nbody')
-    const compiler = { options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } } }
+    const compiler = {
+      options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } }
+    }
 
     await runBeforeCompile(new ContentmapWebpackPlugin({ root: fixture.dir }), compiler)
 
@@ -325,7 +339,6 @@ describe('webpack plugin', () => {
     expect(hooks).toHaveLength(3)
   })
 })
-
 
 describe('adapter lifecycles', () => {
   fixtureTest('one environment finishing does not disturb another', async ({ fixture }) => {

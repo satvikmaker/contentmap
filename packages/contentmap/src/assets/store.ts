@@ -196,7 +196,8 @@ export class AssetStore {
       const existing = await stat(target).catch(() => undefined)
       if (existing && existing.size === entry.size) return
       await mkdir(dirname(target), { recursive: true })
-      const buffer = this.#buffers.get(name) ?? (await withFdRetry(() => readFile(entry.sourcePath)))
+      const buffer =
+        this.#buffers.get(name) ?? (await withFdRetry(() => readFile(entry.sourcePath)))
       await withFdRetry(() => writeFile(target, buffer))
       written++
     })

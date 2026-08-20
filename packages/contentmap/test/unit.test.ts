@@ -19,12 +19,16 @@ describe('mapLimit', () => {
   it('never exceeds the concurrency limit', async () => {
     let live = 0
     let peak = 0
-    await mapLimit(Array.from({ length: 50 }, (_, i) => i), 4, async () => {
-      peak = Math.max(peak, ++live)
-      await new Promise(r => setTimeout(r, 1))
-      live--
-      return null
-    })
+    await mapLimit(
+      Array.from({ length: 50 }, (_, i) => i),
+      4,
+      async () => {
+        peak = Math.max(peak, ++live)
+        await new Promise(r => setTimeout(r, 1))
+        live--
+        return null
+      }
+    )
     expect(peak).toBeLessThanOrEqual(4)
   })
 
@@ -189,7 +193,12 @@ describe('runtime Query', () => {
   it('chains where/sortBy/limit/skip without mutating the source', () => {
     const q = withModules()
     expect(q.where({ n: 1 }).count()).toBe(1)
-    expect(q.sortBy('n').all().map(r => r['title'])).toEqual(['Beta', 'Alpha', 'Gamma'])
+    expect(
+      q
+        .sortBy('n')
+        .all()
+        .map(r => r['title'])
+    ).toEqual(['Beta', 'Alpha', 'Gamma'])
     expect(q.sortBy('n', 'desc').first()?.['title']).toBe('Gamma')
     expect(q.limit(2).count()).toBe(2)
     expect(q.skip(2).ids()).toEqual(['c'])
@@ -227,9 +236,9 @@ describe('runtime Query', () => {
     const groups = withModules().select('title').groupBy('n')
 
     expect([...groups.keys()].sort()).toEqual([1, 2, 3])
-    expect([...groups.values()].every(rows => 'title' in (rows[0] ?? {}) && !('n' in (rows[0] ?? {})))).toBe(
-      true
-    )
+    expect(
+      [...groups.values()].every(rows => 'title' in (rows[0] ?? {}) && !('n' in (rows[0] ?? {})))
+    ).toBe(true)
   })
 
   it('filters on a field that was not selected', () => {

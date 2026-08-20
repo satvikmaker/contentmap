@@ -50,9 +50,7 @@ export type AssetResolver = (
 ) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
 
 /** Measures an already-registered asset. */
-export type ImageResolver = (
-  url: string
-) => Promise<Image | undefined>
+export type ImageResolver = (url: string) => Promise<Image | undefined>
 
 /** Everything the builder supplies for relations, caching and file emission. */
 export interface ContextServices {
@@ -203,12 +201,13 @@ export function createTransformContext(input: ContextInput): TransformContext {
     },
 
     documents: (collection => services().documents(collection)) as TransformContext['documents'],
-    siblings: <T,>() => services().siblings() as Promise<T[]>,
-    resolve: ((collection, id) => services().resolve(collection, id)) as TransformContext['resolve'],
+    siblings: <T>() => services().siblings() as Promise<T[]>,
+    resolve: ((collection, id) =>
+      services().resolve(collection, id)) as TransformContext['resolve'],
     resolveMany: ((collection, ids) =>
       services().resolveMany(collection, ids)) as TransformContext['resolveMany'],
     reference: (collection: CollectionRef, id: string) => services().reference(collection, id),
-    cache: <T,>(value: unknown, fn: () => Promise<T> | T, options?: { key?: string }) =>
+    cache: <T>(value: unknown, fn: () => Promise<T> | T, options?: { key?: string }) =>
       services().cache(value, fn, options),
     emitFile: (name: string, content: string | Uint8Array) => services().emitFile(name, content),
     addWatchFile: (path: string) => services().addWatchFile(path)

@@ -394,10 +394,7 @@ export class Builder {
     const unique = [...new Set(paths)].sort()
     const out = await mapLimit(unique, 16, async path => {
       try {
-        const [buffer, info] = await Promise.all([
-          withFdRetry(() => readFile(path)),
-          stat(path)
-        ])
+        const [buffer, info] = await Promise.all([withFdRetry(() => readFile(path)), stat(path)])
         return { path, digest: digestOf(buffer), mtimeMs: info.mtimeMs, size: info.size }
       } catch {
         // Missing is a state like any other: recording it means the file
@@ -643,7 +640,9 @@ export class Builder {
     diagnostics: DiagnosticBag,
     stack: readonly string[]
   ): Promise<Record<string, unknown> | undefined> {
-    return this.#time('transform', () => this.#runTransformInner(collection, validated, documentMeta, file, body, diagnostics, stack))
+    return this.#time('transform', () =>
+      this.#runTransformInner(collection, validated, documentMeta, file, body, diagnostics, stack)
+    )
   }
 
   async #runTransformInner(
@@ -864,7 +863,7 @@ export class Builder {
           message: `Duplicate record id "${record.id}" from loader "${loader.name}"`,
           collection: collection.name,
           documentId: record.id,
-          hint: 'Ids must be unique within a collection. Check the loader\'s `id` function.'
+          hint: "Ids must be unique within a collection. Check the loader's `id` function."
         })
         return undefined
       }
@@ -876,7 +875,11 @@ export class Builder {
       // embed a document or reference an image that moved underneath it. The
       // file path learned this the hard way; the loader path gets it for free
       // by sharing the same check.
-      if (unchanged && prior && !(await this.#dependenciesChanged(prior, collection, config, diagnostics, stack))) {
+      if (
+        unchanged &&
+        prior &&
+        !(await this.#dependenciesChanged(prior, collection, config, diagnostics, stack))
+      ) {
         cacheHits += 1
         await this.#transformCache?.retain(collection.name, record.id)
         // Reused documents never re-register their assets, so readopt them or
@@ -1065,9 +1068,10 @@ export class Builder {
     this.#refsFor.set(refKey(collection.name, documentMeta.id), refs)
     this.#watchFor.set(refKey(collection.name, documentMeta.id), watchFiles)
 
-    const targetOf = async (ref: CollectionRef): Promise<{ name: string; result: CollectionResult }> => {
-      const name =
-        typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+    const targetOf = async (
+      ref: CollectionRef
+    ): Promise<{ name: string; result: CollectionResult }> => {
+      const name = typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
       if (!name || !config.collections[name]) {
         throw new UnknownCollectionError(String(name), Object.keys(config.collections))
       }
@@ -1089,7 +1093,11 @@ export class Builder {
         // Existence is checked for scalars AND lists. Contentlayer validates
         // only the scalar case and ships `// TODO also check for references in
         // lists`, so a broken list reference passes silently.
-        throw new MissingReferenceError(name, id, result.entries.map(e => e.id))
+        throw new MissingReferenceError(
+          name,
+          id,
+          result.entries.map(e => e.id)
+        )
       }
       refs.push({ collection: name, id, digest: mode === 'embed' ? found.emitKey : 'exists' })
       return found
@@ -1108,8 +1116,7 @@ export class Builder {
         return all.filter(d => d._meta.id !== documentMeta.id)
       },
       documents: async ref => {
-        const requested =
-          typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+        const requested = typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
         if (requested === collection.name) {
           throw new SelfReferenceError(collection.name)
         }
@@ -1149,13 +1156,7 @@ export class Builder {
         return id
       },
       cache: (input, fn, options) =>
-        this.#transformCache!.through(
-          collection.name,
-          documentMeta.id,
-          input,
-          fn,
-          options?.key
-        ),
+        this.#transformCache!.through(collection.name, documentMeta.id, input, fn, options?.key),
       emitFile: async (name, content) => {
         const target = join(config.output.dir, 'files', name)
         if (!config.dryRun) {
@@ -1181,7 +1182,9 @@ export class Builder {
     documentMeta: DocumentMeta,
     from: string
   ): {
-    resolveAsset: (url: string) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
+    resolveAsset: (
+      url: string
+    ) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
     resolveImage: (url: string) => Promise<Image | undefined>
     rewrite: (html: string) => Promise<string>
   } {
@@ -1257,20 +1260,20 @@ export class Builder {
         const result = await rewriteHtml(html, {
           resolve: async (url): Promise<ResolvedAsset | undefined> => {
             try {
-            const ext = extname(splitUrl(url).path).toLowerCase()
-            if (isImageExtension(ext) && config.images) {
-              const measured = await measure(url)
-              if (!measured) return undefined
-              return {
-                src: measured.src,
-                sourcePath: resolve(dirname(from), decodeURI(splitUrl(url).path)),
-                ...(measured.width > 0 ? { width: measured.width, height: measured.height } : {})
+              const ext = extname(splitUrl(url).path).toLowerCase()
+              if (isImageExtension(ext) && config.images) {
+                const measured = await measure(url)
+                if (!measured) return undefined
+                return {
+                  src: measured.src,
+                  sourcePath: resolve(dirname(from), decodeURI(splitUrl(url).path)),
+                  ...(measured.width > 0 ? { width: measured.width, height: measured.height } : {})
+                }
               }
-            }
-            const registered = await register(url)
-            return registered
-              ? { src: registered.src, sourcePath: registered.sourcePath }
-              : undefined
+              const registered = await register(url)
+              return registered
+                ? { src: registered.src, sourcePath: registered.sourcePath }
+                : undefined
             } catch (error) {
               if (error instanceof OutsideRootError) {
                 this.#logger.warn(
@@ -1336,7 +1339,10 @@ export class Builder {
         file: file.relativePath,
         collection: collection.name,
         ...(position
-          ? { line: position.line, ...(position.column === undefined ? {} : { column: position.column }) }
+          ? {
+              line: position.line,
+              ...(position.column === undefined ? {} : { column: position.column })
+            }
           : {}),
         ...(position ? { frame: codeFrame(file.content, position) } : {}),
         hint: `Parsed with the "${parser.name}" parser.`
@@ -1547,7 +1553,7 @@ class OutsideRootError extends Error {
 export class SelfReferenceError extends Error {
   override readonly name = 'SelfReferenceError'
   readonly hint =
-    'Use `ctx.siblings()` for the other documents in this collection. They are the schema-validated form, because a transform cannot see its own collection\'s transformed output.'
+    "Use `ctx.siblings()` for the other documents in this collection. They are the schema-validated form, because a transform cannot see its own collection's transformed output."
   constructor(collection: string) {
     super(`Collection "${collection}" cannot read itself through documents()`)
   }
@@ -1563,7 +1569,9 @@ export class MissingReferenceError extends Error {
     this.collection = collection
     this.known = known
     const guess = suggest(id.split('", "')[0] ?? id, known)
-    this.hint = guess ? `Did you mean "${guess}"?` : `${known.length} document(s) in that collection.`
+    this.hint = guess
+      ? `Did you mean "${guess}"?`
+      : `${known.length} document(s) in that collection.`
   }
 }
 

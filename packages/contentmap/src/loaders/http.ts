@@ -1,4 +1,10 @@
-import { defineLoader, type LoadedRecord, type Loader, type LoaderContext, type LoadResult } from './types.ts'
+import {
+  defineLoader,
+  type LoadedRecord,
+  type Loader,
+  type LoaderContext,
+  type LoadResult
+} from './types.ts'
 
 export type Revalidate = 'etag' | 'always' | { seconds: number }
 export type RemoteErrorPolicy = 'cache' | 'fail' | 'empty'

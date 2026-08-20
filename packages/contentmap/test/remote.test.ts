@@ -3,7 +3,12 @@ import { readdir, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createBuilder } from '../src/builder.ts'
-import { findSecret, redactSecrets, screenForSecrets, SecretLeakError } from '../src/security/secrets.ts'
+import {
+  findSecret,
+  redactSecrets,
+  screenForSecrets,
+  SecretLeakError
+} from '../src/security/secrets.ts'
 import { fixtureTest } from './helpers.ts'
 
 const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
@@ -12,7 +17,9 @@ const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
  * A scripted transport, so these tests never touch the network and can assert
  * exactly how many requests were made.
  */
-function transport(script: (n: number) => { status?: number; body?: string; headers?: Record<string, string> }) {
+function transport(
+  script: (n: number) => { status?: number; body?: string; headers?: Record<string, string> }
+) {
   const calls: { headers: Record<string, string> }[] = []
   const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
     const headers = Object.fromEntries(
@@ -119,7 +126,12 @@ describe('remote collections', () => {
   })
 
   fixtureTest('a duplicate id from the loader is a build error', async ({ fixture }) => {
-    const dupe = JSON.stringify({ items: [{ slug: 'x', version: '1', notes: 'a' }, { slug: 'x', version: '2', notes: 'b' }] })
+    const dupe = JSON.stringify({
+      items: [
+        { slug: 'x', version: '1', notes: 'a' },
+        { slug: 'x', version: '2', notes: 'b' }
+      ]
+    })
     await fixture.write(
       'contentmap.config.ts',
       config(scriptedLoader(`async () => new Response(${JSON.stringify(dupe)}, { status: 200 })`))
@@ -260,8 +272,7 @@ describe('remote collections', () => {
   })
 })
 
-
-describe('remote collections share the file path\'s invariants', () => {
+describe("remote collections share the file path's invariants", () => {
   const authorsAndRemote = (loaderScript: string, transform: string) =>
     `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}\n` +
     `import { z } from 'zod'\n` +
@@ -277,31 +288,34 @@ describe('remote collections share the file path\'s invariants', () => {
     `})\n` +
     `export default defineConfig({ collections: { authors, releases } })\n`
 
-  fixtureTest('a reused record still refreshes when a referenced document changes', async ({
-    fixture
-  }) => {
-    // Reuse keyed on the record digest alone is not enough: the record may
-    // embed a document that moved underneath it.
-    await fixture.write('content/authors/jane.yaml', 'name: Jane')
-    await fixture.write(
-      'contentmap.config.ts',
-      authorsAndRemote(
-        `async () => new Response(${JSON.stringify(RECORDS)}, { status: 200 })`,
-        'async (doc, ctx) => ({ slug: doc.slug, author: await ctx.resolve(authors, "jane") })'
+  fixtureTest(
+    'a reused record still refreshes when a referenced document changes',
+    async ({ fixture }) => {
+      // Reuse keyed on the record digest alone is not enough: the record may
+      // embed a document that moved underneath it.
+      await fixture.write('content/authors/jane.yaml', 'name: Jane')
+      await fixture.write(
+        'contentmap.config.ts',
+        authorsAndRemote(
+          `async () => new Response(${JSON.stringify(RECORDS)}, { status: 200 })`,
+          'async (doc, ctx) => ({ slug: doc.slug, author: await ctx.resolve(authors, "jane") })'
+        )
       )
-    )
 
-    const builder = createBuilder({ root: fixture.dir })
-    await builder.build()
-    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain('"Jane"')
+      const builder = createBuilder({ root: fixture.dir })
+      await builder.build()
+      expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain(
+        '"Jane"'
+      )
 
-    await new Promise(r => setTimeout(r, 10))
-    await fixture.write('content/authors/jane.yaml', 'name: Jane Updated')
-    await builder.build()
-    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain(
-      '"Jane Updated"'
-    )
-  })
+      await new Promise(r => setTimeout(r, 10))
+      await fixture.write('content/authors/jane.yaml', 'name: Jane Updated')
+      await builder.build()
+      expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain(
+        '"Jane Updated"'
+      )
+    }
+  )
 
   fixtureTest('siblings() sees the other records, not an empty list', async ({ fixture }) => {
     // Reading the built entries would return nothing, because they do not
@@ -320,8 +334,12 @@ describe('remote collections share the file path\'s invariants', () => {
     )
     const result = await createBuilder({ root: fixture.dir }).build()
     expect(result.errors).toBe(0)
-    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain('"v2"')
-    expect(await readFile(join(fixture.dir, '.contentmap/releases/v2.js'), 'utf8')).toContain('"v1"')
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v1.js'), 'utf8')).toContain(
+      '"v2"'
+    )
+    expect(await readFile(join(fixture.dir, '.contentmap/releases/v2.js'), 'utf8')).toContain(
+      '"v1"'
+    )
   })
 })
 

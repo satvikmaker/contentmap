@@ -11,17 +11,50 @@ import { basename, extname } from 'node:path'
  */
 export const DEFAULT_ASSET_EXTENSIONS: readonly string[] = [
   // images
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.bmp', '.tif', '.tiff',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.svg',
+  '.ico',
+  '.bmp',
+  '.tif',
+  '.tiff',
   // media
-  '.mp4', '.webm', '.ogv', '.mp3', '.wav', '.m4a', '.oga', '.mov',
+  '.mp4',
+  '.webm',
+  '.ogv',
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.oga',
+  '.mov',
   // documents and archives
-  '.pdf', '.zip', '.csv', '.txt',
+  '.pdf',
+  '.zip',
+  '.csv',
+  '.txt',
   // fonts
-  '.woff', '.woff2', '.ttf', '.otf'
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf'
 ]
 
 const IMAGE_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.bmp', '.tif', '.tiff'
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.svg',
+  '.ico',
+  '.bmp',
+  '.tif',
+  '.tiff'
 ])
 
 export function isImageExtension(ext: string): boolean {
@@ -69,11 +102,7 @@ export function splitUrl(url: string): SplitUrl {
  * identical files under different names still produce distinct entries the
  * copier can dedupe.
  */
-export function expandTemplate(
-  template: string,
-  sourcePath: string,
-  digest: string
-): string {
+export function expandTemplate(template: string, sourcePath: string, digest: string): string {
   const ext = extname(sourcePath)
   const stem = basename(sourcePath, ext)
   return template.replace(

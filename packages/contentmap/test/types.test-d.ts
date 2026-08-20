@@ -47,7 +47,6 @@ describe('serializability is enforced at compile time', () => {
   })
 })
 
-
 describe('reference inference', () => {
   const authors = defineCollection({
     name: 'authors',

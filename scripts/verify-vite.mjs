@@ -42,7 +42,11 @@ try {
   const code = output.map(chunk => chunk.code ?? '').join('\n')
 
   const ok = code.includes('Hello From Content') && code.includes('Second Doc')
-  console.log(ok ? 'PASS  vite build resolved and bundled the generated content' : 'FAIL  content missing from the bundle')
+  console.log(
+    ok
+      ? 'PASS  vite build resolved and bundled the generated content'
+      : 'FAIL  content missing from the bundle'
+  )
   if (!ok) {
     console.log('--- bundle head ---')
     console.log(code.slice(0, 400))

@@ -176,7 +176,8 @@ describe('asset pipeline', () => {
       config(
         COLLECTION(
           'async (doc, ctx) => ({ title: doc.title, cover: await ctx.image(doc.cover ?? "hero.png") })'
-        ) + `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image() })`
+        ) +
+          `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image() })`
       )
     )
     await fixture.writeBytes('content/hero.png', PNG)
@@ -222,60 +223,69 @@ describe('asset pipeline', () => {
     await expect(stat(join(fixture.dir, 'public/_content', pngName))).resolves.toBeTruthy()
   })
 
-  fixtureTest('a changed image invalidates the documents that reference it', async ({ fixture }) => {
-    await fixture.write(
-      'contentmap.config.ts',
-      config(
-        COLLECTION('async (doc, ctx) => ({ title: doc.title, html: await ctx.markdown() })') +
-          `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image() })`
+  fixtureTest(
+    'a changed image invalidates the documents that reference it',
+    async ({ fixture }) => {
+      await fixture.write(
+        'contentmap.config.ts',
+        config(
+          COLLECTION('async (doc, ctx) => ({ title: doc.title, html: await ctx.markdown() })') +
+            `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image() })`
+        )
       )
-    )
-    await fixture.writeBytes('content/hero.png', PNG)
-    await fixture.write('content/a.md', '---\ntitle: A\n---\n![h](hero.png)')
+      await fixture.writeBytes('content/hero.png', PNG)
+      await fixture.write('content/a.md', '---\ntitle: A\n---\n![h](hero.png)')
 
-    const builder = createBuilder({ root: fixture.dir })
-    await builder.build()
-    const first = /hero-[0-9a-f]{8}\.png/.exec(
-      await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
-    )![0]
+      const builder = createBuilder({ root: fixture.dir })
+      await builder.build()
+      const first = /hero-[0-9a-f]{8}\.png/.exec(
+        await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+      )![0]
 
-    // Replace the image. The markdown file is untouched, so velite's
-    // content-file-only invalidation keeps serving the old fingerprint.
-    await new Promise(r => setTimeout(r, 10))
-    await writeFile(join(fixture.dir, 'content/hero.png'), GIF)
-    await builder.build()
+      // Replace the image. The markdown file is untouched, so velite's
+      // content-file-only invalidation keeps serving the old fingerprint.
+      await new Promise(r => setTimeout(r, 10))
+      await writeFile(join(fixture.dir, 'content/hero.png'), GIF)
+      await builder.build()
 
-    const second = /hero-[0-9a-f]{8}\.(png|gif)/.exec(
-      await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
-    )![0]
-    expect(second).not.toBe(first)
-    await expect(stat(join(fixture.dir, 'public/_content', second))).resolves.toBeTruthy()
-    await expect(stat(join(fixture.dir, 'public/_content', first))).rejects.toThrow()
-  })
+      const second = /hero-[0-9a-f]{8}\.(png|gif)/.exec(
+        await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+      )![0]
+      expect(second).not.toBe(first)
+      await expect(stat(join(fixture.dir, 'public/_content', second))).resolves.toBeTruthy()
+      await expect(stat(join(fixture.dir, 'public/_content', first))).rejects.toThrow()
+    }
+  )
 
-  fixtureTest('works without an image processor, degrading to a plain copy', async ({ fixture }) => {
-    await fixture.write(
-      'contentmap.config.ts',
-      config(
-        COLLECTION('async (doc, ctx) => ({ title: doc.title, logo: await ctx.asset("hero.png") })') +
-          `\nexport default defineConfig({ collections: { posts }, renderer: markdown() })`,
-        false
+  fixtureTest(
+    'works without an image processor, degrading to a plain copy',
+    async ({ fixture }) => {
+      await fixture.write(
+        'contentmap.config.ts',
+        config(
+          COLLECTION(
+            'async (doc, ctx) => ({ title: doc.title, logo: await ctx.asset("hero.png") })'
+          ) + `\nexport default defineConfig({ collections: { posts }, renderer: markdown() })`,
+          false
+        )
       )
-    )
-    await fixture.writeBytes('content/hero.png', PNG)
-    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+      await fixture.writeBytes('content/hero.png', PNG)
+      await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
 
-    const result = await createBuilder({ root: fixture.dir }).build()
-    expect(result.errors).toBe(0)
-    const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
-    expect(doc).toMatch(/logo: "\/_content\/hero-[0-9a-f]{8}\.png"/)
-  })
+      const result = await createBuilder({ root: fixture.dir }).build()
+      expect(result.errors).toBe(0)
+      const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+      expect(doc).toMatch(/logo: "\/_content\/hero-[0-9a-f]{8}\.png"/)
+    }
+  )
 
   fixtureTest('a missing asset names the file rather than crashing', async ({ fixture }) => {
     await fixture.write(
       'contentmap.config.ts',
       config(
-        COLLECTION('async (doc, ctx) => ({ title: doc.title, logo: await ctx.asset("nope.png") })') +
+        COLLECTION(
+          'async (doc, ctx) => ({ title: doc.title, logo: await ctx.asset("nope.png") })'
+        ) +
           `\nexport default defineConfig({ collections: { posts }, renderer: markdown(), images: image() })`
       )
     )
@@ -287,7 +297,6 @@ describe('asset pipeline', () => {
     expect(d?.file).toBe('a.md')
   })
 })
-
 
 describe('asset safety', () => {
   const cfg = (transform: string, extra = '') =>

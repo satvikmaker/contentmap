@@ -188,7 +188,6 @@ function reportPhases(phases: Readonly<Record<string, number>>, totalMs: number)
   )
 }
 
-
 /** `file.ts:12:3` appearing anywhere in a message or stack. */
 const LOCATION_RE = /([^\s():]+\.(?:[cm]?[tj]s|json|ya?ml)):(\d+)(?::(\d+))?/
 
@@ -226,8 +225,7 @@ async function reportFatal(error: unknown, verbose: boolean): Promise<void> {
   // config that failed to parse). For our own errors the deepest frame is
   // contentmap's dist bundle, and printing that shows the user our internals
   // instead of their problem.
-  const match =
-    LOCATION_RE.exec(message) ?? (ours ? null : firstUserFrame(err?.stack ?? ''))
+  const match = LOCATION_RE.exec(message) ?? (ours ? null : firstUserFrame(err?.stack ?? ''))
   const file = err.file ?? (match?.[1] === undefined ? undefined : stripScheme(match[1]))
   const line = match?.[2] === undefined ? undefined : Number(match[2])
   const column = match?.[3] === undefined ? undefined : Number(match[3])
@@ -430,7 +428,9 @@ async function scaffold(options: BuilderOptions, values: Values): Promise<number
   for (const file of result.created) process.stdout.write(`  ${green('+')} ${file}\n`)
   for (const file of result.updated) process.stdout.write(`  ${cyan('~')} ${file}\n`)
   for (const file of result.skipped) {
-    process.stdout.write(`  ${dim('=')} ${dim(`${file} (exists, left alone — pass --force to replace)`)}\n`)
+    process.stdout.write(
+      `  ${dim('=')} ${dim(`${file} (exists, left alone — pass --force to replace)`)}\n`
+    )
   }
   process.stdout.write('\n')
   for (const note of result.notes) process.stdout.write(`  ${dim(note)}\n`)

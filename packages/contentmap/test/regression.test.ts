@@ -6,9 +6,7 @@ import { createBuilder } from '../src/builder.ts'
 import { fixtureTest } from './helpers.ts'
 
 const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
-const MARKDOWN_SRC = pathToFileURL(
-  resolve(import.meta.dirname, '../../markdown/src/index.ts')
-).href
+const MARKDOWN_SRC = pathToFileURL(resolve(import.meta.dirname, '../../markdown/src/index.ts')).href
 const config = (body: string): string =>
   `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}\n` +
   `import { z } from 'zod'\n\n${body}\n`
@@ -21,42 +19,48 @@ const posts = defineCollection({
 export default defineConfig({ collections: { posts } })`
 
 describe('incremental correctness', () => {
-  fixtureTest('does not resurrect a stale document when an edit breaks validation', async ({ fixture }) => {
-    await fixture.write('contentmap.config.ts', config(POSTS()))
-    await fixture.write('content/a.md', '---\ntitle: Good\n---\nbody')
-    const builder = createBuilder({ root: fixture.dir, onValidationError: 'skip' })
+  fixtureTest(
+    'does not resurrect a stale document when an edit breaks validation',
+    async ({ fixture }) => {
+      await fixture.write('contentmap.config.ts', config(POSTS()))
+      await fixture.write('content/a.md', '---\ntitle: Good\n---\nbody')
+      const builder = createBuilder({ root: fixture.dir, onValidationError: 'skip' })
 
-    const first = await builder.build()
-    expect(first.documents).toBe(1)
-    expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('Good')
+      const first = await builder.build()
+      expect(first.documents).toBe(1)
+      expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('Good')
 
-    // Same path, now invalid. The document must disappear — not silently fall
-    // back to the previously cached version.
-    await new Promise(r => setTimeout(r, 10))
-    await writeFile(
-      join(fixture.dir, 'content/a.md'),
-      '---\ntitle: This title is far too long to pass\n---\nbody'
-    )
-    const second = await builder.build()
-    expect(second.documents).toBe(0)
-    const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
-    expect(index).not.toContain('Good')
-  })
+      // Same path, now invalid. The document must disappear — not silently fall
+      // back to the previously cached version.
+      await new Promise(r => setTimeout(r, 10))
+      await writeFile(
+        join(fixture.dir, 'content/a.md'),
+        '---\ntitle: This title is far too long to pass\n---\nbody'
+      )
+      const second = await builder.build()
+      expect(second.documents).toBe(0)
+      const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+      expect(index).not.toContain('Good')
+    }
+  )
 
-  fixtureTest('drops documents whose file was deleted, and removes the module', async ({ fixture }) => {
-    await fixture.write('contentmap.config.ts', config(POSTS()))
-    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
-    await fixture.write('content/b.md', '---\ntitle: B\n---\nx')
-    const builder = createBuilder({ root: fixture.dir })
-    expect((await builder.build()).documents).toBe(2)
+  fixtureTest(
+    'drops documents whose file was deleted, and removes the module',
+    async ({ fixture }) => {
+      await fixture.write('contentmap.config.ts', config(POSTS()))
+      await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+      await fixture.write('content/b.md', '---\ntitle: B\n---\nx')
+      const builder = createBuilder({ root: fixture.dir })
+      expect((await builder.build()).documents).toBe(2)
 
-    await rm(join(fixture.dir, 'content/b.md'))
-    const second = await builder.build()
-    expect(second.documents).toBe(1)
-    // Orphaned module files bloat deploys and confuse anyone reading dist.
-    await expect(stat(join(fixture.dir, '.contentmap/posts/b.js'))).rejects.toThrow()
-    await expect(stat(join(fixture.dir, '.contentmap/posts/a.js'))).resolves.toBeTruthy()
-  })
+      await rm(join(fixture.dir, 'content/b.md'))
+      const second = await builder.build()
+      expect(second.documents).toBe(1)
+      // Orphaned module files bloat deploys and confuse anyone reading dist.
+      await expect(stat(join(fixture.dir, '.contentmap/posts/b.js'))).rejects.toThrow()
+      await expect(stat(join(fixture.dir, '.contentmap/posts/a.js'))).resolves.toBeTruthy()
+    }
+  )
 
   fixtureTest('detects duplicate document ids instead of overwriting', async ({ fixture }) => {
     // `a.md` and `a/index.md` both resolve to the id "a".
@@ -219,10 +223,16 @@ describe('check / dry run', () => {
 })
 
 describe('config guards', () => {
-  const bad = (body: string) => async ({ fixture }: { fixture: { dir: string; write: (p: string, c: string) => Promise<string> } }) => {
-    await fixture.write('contentmap.config.ts', config(body))
-    return createBuilder({ root: fixture.dir }).build()
-  }
+  const bad =
+    (body: string) =>
+    async ({
+      fixture
+    }: {
+      fixture: { dir: string; write: (p: string, c: string) => Promise<string> }
+    }) => {
+      await fixture.write('contentmap.config.ts', config(body))
+      return createBuilder({ root: fixture.dir }).build()
+    }
 
   fixtureTest('rejects two collections with the same name', async ({ fixture }) => {
     await expect(
@@ -250,15 +260,17 @@ export default defineConfig({ collections: { a } })`)({ fixture })
     ).rejects.toThrow(/both `index` and `heavy`/)
   })
 
-  fixtureTest("rejects output.types: 'explicit' rather than silently ignoring it", async ({ fixture }) => {
-    await expect(
-      bad(`
+  fixtureTest(
+    "rejects output.types: 'explicit' rather than silently ignoring it",
+    async ({ fixture }) => {
+      await expect(
+        bad(`
 const a = defineCollection({ name: 'a', directory: 'content', include: '*.md', schema: z.object({ t: z.string() }) })
 export default defineConfig({ collections: { a }, output: { types: 'explicit' } })`)({ fixture })
-    ).rejects.toThrow(/not implemented/)
-  })
+      ).rejects.toThrow(/not implemented/)
+    }
+  )
 })
-
 
 describe('transform context', () => {
   const withRenderer = (extra: string) =>
@@ -297,23 +309,26 @@ export default defineConfig({ collections: { posts }, renderer: markdown() })`)
     expect(source).toContain('<p>One two three four five.</p>')
   })
 
-  fixtureTest('reports an unserializable transform result against its file', async ({ fixture }) => {
-    await fixture.write(
-      'contentmap.config.ts',
-      withRenderer(`
+  fixtureTest(
+    'reports an unserializable transform result against its file',
+    async ({ fixture }) => {
+      await fixture.write(
+        'contentmap.config.ts',
+        withRenderer(`
 const posts = defineCollection({
   name: 'posts', directory: 'content', include: '**/*.md',
   schema: z.object({ title: z.string() }),
   transform: (doc) => ({ title: doc.title, render: () => 'nope' })
 })
 export default defineConfig({ collections: { posts }, renderer: markdown() })`)
-    )
-    await fixture.write('content/a.md', '---\ntitle: A\n---\nbody')
+      )
+      await fixture.write('content/a.md', '---\ntitle: A\n---\nbody')
 
-    const result = await createBuilder({ root: fixture.dir }).build()
-    expect(result.errors).toBeGreaterThan(0)
-    const d = result.diagnostics.find(x => x.code === 'CM_SERIALIZE')
-    expect(d?.file).toBe('a.md')
-    expect(d?.message).toMatch(/function/i)
-  })
+      const result = await createBuilder({ root: fixture.dir }).build()
+      expect(result.errors).toBeGreaterThan(0)
+      const d = result.diagnostics.find(x => x.code === 'CM_SERIALIZE')
+      expect(d?.file).toBe('a.md')
+      expect(d?.message).toMatch(/function/i)
+    }
+  )
 })

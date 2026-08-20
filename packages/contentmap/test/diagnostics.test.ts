@@ -166,66 +166,72 @@ const SCHEMA = `z.object({
   })`
 
 describe('defect corpus', () => {
-  fixtureTest('reports twelve distinct defect classes, each naming its file', async ({ fixture }) => {
-    await fixture.write(
-      'contentmap.config.ts',
-      config(`
+  fixtureTest(
+    'reports twelve distinct defect classes, each naming its file',
+    async ({ fixture }) => {
+      await fixture.write(
+        'contentmap.config.ts',
+        config(`
 const posts = defineCollection({
   name: 'posts', directory: 'content', include: '**/*.{md,yaml,json}',
   schema: ${SCHEMA}
 })
 export default defineConfig({ collections: { posts } })`)
-    )
+      )
 
-    // 1 wrong scalar type
-    await fixture.write('content/01-type.md', '---\ntitle: [an, array]\n---\nx')
-    // 2 too long
-    await fixture.write('content/02-long.md', '---\ntitle: way way way too long for this schema\n---\nx')
-    // 3 nested field
-    await fixture.write('content/03-nested.md', '---\ntitle: N\nnested:\n  deep: 5\n---\nx')
-    // 4 array element
-    await fixture.write('content/04-list.md', '---\ntitle: L\nlist:\n  - a: 1\n---\nx')
-    // 5 bad date
-    await fixture.write('content/05-date.md', '---\ntitle: D\ndate: not-a-date\n---\nx')
-    // 6 malformed YAML
-    await fixture.write('content/06-yaml.md', '---\ntitle: Y\n  bad: [indent\n---\nx')
-    // 7 frontmatter that is not a mapping
-    await fixture.write('content/07-seq.md', '---\n- a\n- b\n---\nx')
-    // 8 root-level array in yaml
-    await fixture.write('content/08-root.yaml', '- not\n- objects')
-    // 9 malformed JSON
-    await fixture.write('content/09-bad.json', '{ "title": ')
-    // 10 unknown field
-    await fixture.write('content/10-unknown.md', '---\ntitle: U\ncatgeory: news\n---\nx')
-    // 11 + 12 duplicate id from a flat file and an index file
-    await fixture.write('content/dupe.md', '---\ntitle: A\n---\nx')
-    await fixture.write('content/dupe/index.md', '---\ntitle: B\n---\nx')
+      // 1 wrong scalar type
+      await fixture.write('content/01-type.md', '---\ntitle: [an, array]\n---\nx')
+      // 2 too long
+      await fixture.write(
+        'content/02-long.md',
+        '---\ntitle: way way way too long for this schema\n---\nx'
+      )
+      // 3 nested field
+      await fixture.write('content/03-nested.md', '---\ntitle: N\nnested:\n  deep: 5\n---\nx')
+      // 4 array element
+      await fixture.write('content/04-list.md', '---\ntitle: L\nlist:\n  - a: 1\n---\nx')
+      // 5 bad date
+      await fixture.write('content/05-date.md', '---\ntitle: D\ndate: not-a-date\n---\nx')
+      // 6 malformed YAML
+      await fixture.write('content/06-yaml.md', '---\ntitle: Y\n  bad: [indent\n---\nx')
+      // 7 frontmatter that is not a mapping
+      await fixture.write('content/07-seq.md', '---\n- a\n- b\n---\nx')
+      // 8 root-level array in yaml
+      await fixture.write('content/08-root.yaml', '- not\n- objects')
+      // 9 malformed JSON
+      await fixture.write('content/09-bad.json', '{ "title": ')
+      // 10 unknown field
+      await fixture.write('content/10-unknown.md', '---\ntitle: U\ncatgeory: news\n---\nx')
+      // 11 + 12 duplicate id from a flat file and an index file
+      await fixture.write('content/dupe.md', '---\ntitle: A\n---\nx')
+      await fixture.write('content/dupe/index.md', '---\ntitle: B\n---\nx')
 
-    const result = await createBuilder({ root: fixture.dir, onValidationError: 'skip' }).build()
+      const result = await createBuilder({ root: fixture.dir, onValidationError: 'skip' }).build()
 
-    const codes = new Set(result.diagnostics.map(d => d.code))
-    expect(codes).toContain('CM_VALIDATION')
-    expect(codes).toContain('CM_PARSE')
-    expect(codes).toContain('CM_UNKNOWN_FIELD')
-    expect(codes).toContain('CM_DUPLICATE_ID')
+      const codes = new Set(result.diagnostics.map(d => d.code))
+      expect(codes).toContain('CM_VALIDATION')
+      expect(codes).toContain('CM_PARSE')
+      expect(codes).toContain('CM_UNKNOWN_FIELD')
+      expect(codes).toContain('CM_DUPLICATE_ID')
 
-    // Every diagnostic must name a file. A message with no location is the
-    // failure mode that makes a large corpus unsearchable.
-    for (const d of result.diagnostics) {
-      expect(d.file ?? d.documentId, `${d.code}: ${d.message}`).toBeDefined()
+      // Every diagnostic must name a file. A message with no location is the
+      // failure mode that makes a large corpus unsearchable.
+      for (const d of result.diagnostics) {
+        expect(d.file ?? d.documentId, `${d.code}: ${d.message}`).toBeDefined()
+      }
+
+      // Field-level diagnostics carry a resolvable position.
+      const located = result.diagnostics.filter(d => d.line !== undefined)
+      expect(located.length).toBeGreaterThanOrEqual(6)
+      for (const d of located) expect(d.frame).toBeDefined()
+
+      const bag = new DiagnosticBag()
+      for (const d of result.diagnostics) bag.add(d)
+      const report = renderDiagnostics(bag, { total: result.scanned })
+      expect(report).toContain('Validation')
+      expect(report).toContain('Parse')
+      expect(report).toContain('Unknown field')
+      expect(report).toContain('Duplicate id')
     }
-
-    // Field-level diagnostics carry a resolvable position.
-    const located = result.diagnostics.filter(d => d.line !== undefined)
-    expect(located.length).toBeGreaterThanOrEqual(6)
-    for (const d of located) expect(d.frame).toBeDefined()
-
-    const bag = new DiagnosticBag()
-    for (const d of result.diagnostics) bag.add(d)
-    const report = renderDiagnostics(bag, { total: result.scanned })
-    expect(report).toContain('Validation')
-    expect(report).toContain('Parse')
-    expect(report).toContain('Unknown field')
-    expect(report).toContain('Duplicate id')
-  })
+  )
 })

@@ -42,10 +42,7 @@ export interface ResolvedAsset {
  *
  * The poster is destroyed. The bug is still present on their unmerged branch.
  */
-export async function rewriteHtml(
-  html: string,
-  handlers: RewriteHandlers
-): Promise<RewriteResult> {
+export async function rewriteHtml(html: string, handlers: RewriteHandlers): Promise<RewriteResult> {
   const referenced = new Set<string>()
   const tags = [...html.matchAll(TAG)]
   if (tags.length === 0) return { html, referenced: [] }
@@ -69,13 +66,21 @@ export async function rewriteHtml(
 
       const quoted = attr[3] ?? attr[4]
       const raw = quoted ?? attr[5] ?? ''
-      const valueStart = attrsStart + attr.index + attr[0].length - (attr[2] ?? '').length +
+      const valueStart =
+        attrsStart +
+        attr.index +
+        attr[0].length -
+        (attr[2] ?? '').length +
         (quoted === undefined ? 0 : 1)
 
       if (name === 'srcset') {
         const rewritten = await rewriteSrcset(raw, handlers, referenced)
         if (rewritten !== raw) {
-          edits.push({ start: valueStart, end: valueStart + raw.length, text: escapeAttr(rewritten) })
+          edits.push({
+            start: valueStart,
+            end: valueStart + raw.length,
+            text: escapeAttr(rewritten)
+          })
         }
         continue
       }
@@ -85,7 +90,11 @@ export async function rewriteHtml(
       if (!resolved) continue
       referenced.add(resolved.sourcePath)
       // Only this attribute is touched; its siblings keep their own URLs.
-      edits.push({ start: valueStart, end: valueStart + raw.length, text: escapeAttr(resolved.src) })
+      edits.push({
+        start: valueStart,
+        end: valueStart + raw.length,
+        text: escapeAttr(resolved.src)
+      })
       if (name === 'src' && tagName === 'img') {
         width = resolved.width
         height = resolved.height
@@ -97,9 +106,19 @@ export async function rewriteHtml(
     // Intrinsic dimensions prevent layout shift, and no other tool in this
     // space emits them for images inside the body (velite issue #98, open
     // since 2024).
-    if (tagName === 'img' && width !== undefined && height !== undefined && !hasWidth && !hasHeight) {
+    if (
+      tagName === 'img' &&
+      width !== undefined &&
+      height !== undefined &&
+      !hasWidth &&
+      !hasHeight
+    ) {
       const insertAt = attrsStart + attrs.length
-      replacements.push({ start: insertAt, end: insertAt, text: ` width="${width}" height="${height}"` })
+      replacements.push({
+        start: insertAt,
+        end: insertAt,
+        text: ` width="${width}" height="${height}"`
+      })
     }
   }
 

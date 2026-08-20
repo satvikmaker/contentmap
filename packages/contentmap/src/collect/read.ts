@@ -10,8 +10,6 @@ import { idFromPath, relPosix, toPosix } from '../utils/paths.ts'
 /** Measured optimum on a 10k-file corpus; 28% faster than unbounded. */
 export const READ_CONCURRENCY = 64
 
-
-
 export interface SourceFile {
   absolutePath: string
   relativePath: string
