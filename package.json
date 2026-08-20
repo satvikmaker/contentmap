@@ -28,6 +28,7 @@
     "bench:bundle": "node scripts/bundle-size.mjs",
     "gate:fd": "./scripts/fd-limit-gate.sh",
     "verify:vite": "node --experimental-strip-types scripts/verify-vite.mjs",
+    "verify:types": "node scripts/verify-types.mjs",
     "bench:compare": "node scripts/bench-compare.mjs 1000",
     "verify:footprint": "node scripts/footprint.mjs"
   },

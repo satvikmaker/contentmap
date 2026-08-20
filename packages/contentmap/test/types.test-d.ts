@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
-import { defineCollection } from '../src/config/define.ts'
+import { defineCollection, defineConfig } from '../src/config/define.ts'
 import type { AnyDocument, DocumentMeta, DocumentOf } from '../src/types.ts'
 import type { HasUnserializable, InvalidType, NotSerializable } from '../src/types.ts'
 
@@ -68,5 +68,57 @@ describe('reference inference', () => {
 
   it('falls back to a loose document when a collection is named as a string', () => {
     expectTypeOf<DocumentOf<'authors'>>().toEqualTypeOf<AnyDocument>()
+  })
+})
+
+describe('a user-shaped config compiles', () => {
+  it('accepts a collection with a transform', () => {
+    // `transform` as a property with a function type is contravariant under
+    // strictFunctionTypes, so a concrete collection stopped being assignable to
+    // the erased CollectionDefinition that UserConfig.collections holds. Every
+    // user with a transform got a type error inside their own config file, and
+    // `next build` type-checks the project, so it failed the build outright.
+    //
+    // This asserts the intent, but it is NOT the gate: these tests import
+    // `../src`, and the bug only appears through the emitted `.d.ts`. Reverting
+    // the fix leaves this test green. `pnpm verify:types` is what catches it,
+    // by type-checking a user-shaped project against the built package.
+    const posts = defineCollection({
+      name: 'posts',
+      directory: 'content/posts',
+      include: '**/*.md',
+      schema: z.object({ title: z.string(), date: z.coerce.date(), content: z.string() }),
+      transform: (doc, ctx) => ({ ...doc, slug: ctx.meta.slug })
+    })
+
+    const config = defineConfig({ collections: { posts } })
+
+    expectTypeOf(config.collections.posts).toMatchObjectType<{ name: string }>()
+  })
+})
+
+describe('projection and index keys are separate', () => {
+  it('allows sorting and filtering on fields that were not selected', () => {
+    type Post = {
+      _meta: DocumentMeta
+      title: string
+      date: Date
+      slug: string
+      content: string
+    }
+    type Index = Omit<Post, 'content'>
+
+    const posts = {} as import('../src/runtime/index.ts').Query<Post, keyof Index>
+
+    // The whole point: select what you render, sort by something else.
+    expectTypeOf(posts.select('title', 'slug').sortBy('date', 'desc').all()).toEqualTypeOf<
+      Pick<Post, 'title' | 'slug'>[]
+    >()
+    expectTypeOf(posts.select('title').where({ date: new Date() }).all()).toEqualTypeOf<
+      Pick<Post, 'title'>[]
+    >()
+    expectTypeOf(posts.select('title').groupBy('slug')).toEqualTypeOf<
+      Map<string, Pick<Post, 'title'>[]>
+    >()
   })
 })

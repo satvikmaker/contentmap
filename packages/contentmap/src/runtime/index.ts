@@ -13,14 +13,28 @@
 /** A lazily imported document module, as the generated index emits it. */
 export type ModuleLoader<T> = () => Promise<{ default: T }>
 
-export interface Query<T, K extends keyof T = keyof T> {
+/**
+ * `K` is what a row will be projected to; `I` is what the index actually
+ * holds, and never narrows.
+ *
+ * Keeping them apart is what lets you select the two fields you render and
+ * still sort by a third. Chaining `select` does not drop anything at the
+ * time — projection happens once, at the terminal call — so restricting
+ * `sortBy` to the projection forbade something the runtime does correctly.
+ * "Give me title and slug, newest first" is the ordinary way to ask, and it
+ * failed to compile.
+ *
+ * `I` defaults to `K`, so `Query<Post, keyof PostIndex>` as the generated
+ * index emits it keeps meaning exactly what it did.
+ */
+export interface Query<T, K extends keyof T = keyof T, I extends keyof T = K> {
   /** Narrow the projection. Chaining only ever narrows further. */
-  select<S extends keyof T>(...keys: S[]): Query<T, Extract<S, K>>
-  where(predicate: Partial<Pick<T, K>> | ((doc: Pick<T, K>) => boolean)): Query<T, K>
-  sortBy<F extends K>(field: F, direction?: 'asc' | 'desc'): Query<T, K>
-  limit(n: number): Query<T, K>
-  skip(n: number): Query<T, K>
-  groupBy<F extends K>(field: F): Map<T[F], Pick<T, K>[]>
+  select<S extends keyof T>(...keys: S[]): Query<T, Extract<S, K>, I>
+  where(predicate: Partial<Pick<T, I>> | ((doc: Pick<T, I>) => boolean)): Query<T, K, I>
+  sortBy<F extends I>(field: F, direction?: 'asc' | 'desc'): Query<T, K, I>
+  limit(n: number): Query<T, K, I>
+  skip(n: number): Query<T, K, I>
+  groupBy<F extends I>(field: F): Map<T[F], Pick<T, K>[]>
 
   all(): Pick<T, K>[]
   first(): Pick<T, K> | undefined
@@ -60,8 +74,8 @@ function idOf(row: Record<string, unknown>): string {
   return (row['_meta'] as { id: string }).id
 }
 
-function make<T, K extends keyof T>(state: State<T>): Query<T, K> {
-  const q: Query<T, K> = {
+function make<T, K extends keyof T, I extends keyof T>(state: State<T>): Query<T, K, I> {
+  const q: Query<T, K, I> = {
     select(...next) {
       const keys = state.keys ? state.keys.filter(k => (next as string[]).includes(k)) : (next as string[])
       return make({ ...state, keys })
@@ -100,10 +114,15 @@ function make<T, K extends keyof T>(state: State<T>): Query<T, K> {
     groupBy(field) {
       const key = field as unknown as string
       const out = new Map<unknown, Record<string, unknown>[]>()
-      for (const row of project(state.rows, state.keys)) {
-        const g = out.get(row[key])
-        if (g) g.push(row)
-        else out.set(row[key], [row])
+      // Group on the unprojected row, collect the projected one. Reading the
+      // key after projection put every row in a single `undefined` group
+      // whenever the field was not selected — a wrong answer rather than an
+      // error, which is the worst kind.
+      const rows = project(state.rows, state.keys)
+      for (let i = 0; i < rows.length; i++) {
+        const g = out.get(state.rows[i]![key])
+        if (g) g.push(rows[i]!)
+        else out.set(state.rows[i]![key], [rows[i]!])
       }
       return out as Map<T[typeof field], Pick<T, K>[]>
     },
@@ -142,5 +161,5 @@ export function collection<T>(
   index: readonly Record<string, unknown>[],
   modules: Record<string, ModuleLoader<T>>
 ): Query<T> {
-  return make<T, keyof T>({ index, modules, keys: null, rows: index })
+  return make<T, keyof T, keyof T>({ index, modules, keys: null, rows: index })
 }

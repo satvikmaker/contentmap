@@ -3,6 +3,7 @@
 // reading one title from 5,000 posts bundles 17,141,241 bytes.
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { rolldown } from 'rolldown'
 import { createBuilder } from '../packages/contentmap/dist/index.js'
@@ -56,6 +57,23 @@ try {
   console.log(`bundled for 10 cards  ${kb(bytes)}  (${kb(gz)} gzip)`)
   console.log(`ratio                 ${(bytes / corpus * 100).toFixed(1)}% of corpus`)
   console.log(`content-collections   16,739.5 KB for the same read (measured, issue #784 shape)`)
+
+  // The runtime is the only contentmap code that reaches a user's bundle, and
+  // "under 1 KB" is a claim we make in public. Measured minified, because that
+  // is what ships — the unminified dist is half again as large and comparing
+  // against it would fail this gate for no reason a user would ever feel.
+  const RUNTIME_BUDGET = 1024
+  const runtimeBundle = await rolldown({
+    input: fileURLToPath(new URL('../packages/contentmap/dist/runtime/index.js', import.meta.url)),
+    onwarn: () => {}
+  })
+  const runtimeOut = await runtimeBundle.generate({ format: 'esm', minify: true })
+  const runtimeGz = gzipSync(runtimeOut.output[0].code).length
+  console.log(
+    `runtime (min+gzip)    ${runtimeGz} bytes  (budget ${RUNTIME_BUDGET})  ` +
+      (runtimeGz <= RUNTIME_BUDGET ? 'PASS' : 'FAIL')
+  )
+  if (runtimeGz > RUNTIME_BUDGET) process.exitCode = 1
 } finally {
   await rm(root, { recursive: true, force: true })
 }

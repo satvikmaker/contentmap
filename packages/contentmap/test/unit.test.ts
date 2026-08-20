@@ -209,6 +209,36 @@ describe('runtime Query', () => {
     expect(q.sortBy('n').ids()).toEqual(['c', 'a', 'b'])
   })
 
+  it('sorts by a field that was not selected', () => {
+    // select() records a projection and applies it once, at the terminal call,
+    // so the rows still carry every index field while sorting. "Give me title
+    // and slug, newest first" is the ordinary way to ask.
+    const ordered = withModules().select('title').sortBy('n', 'desc').all()
+
+    expect(ordered.map(r => r['title'])).toEqual(['Gamma', 'Alpha', 'Beta'])
+    // The projection still applied. `_meta` always survives it, because ids()
+    // and load() are reachable from any projected query.
+    expect(Object.keys(ordered[0] ?? {}).sort()).toEqual(['_meta', 'title'])
+  })
+
+  it('groups by a field that was not selected', () => {
+    // Reading the group key after projection put every row into a single
+    // `undefined` group — a wrong answer rather than an error.
+    const groups = withModules().select('title').groupBy('n')
+
+    expect([...groups.keys()].sort()).toEqual([1, 2, 3])
+    expect([...groups.values()].every(rows => 'title' in (rows[0] ?? {}) && !('n' in (rows[0] ?? {})))).toBe(
+      true
+    )
+  })
+
+  it('filters on a field that was not selected', () => {
+    const found = withModules().select('title').where({ n: 1 }).all()
+
+    expect(found.map(r => r['title'])).toEqual(['Beta'])
+    expect(found.every(r => !('n' in r))).toBe(true)
+  })
+
   it('groups by a field', () => {
     const groups = withModules().groupBy('n')
     expect(groups.size).toBe(3)

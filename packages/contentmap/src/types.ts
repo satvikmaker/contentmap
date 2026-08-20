@@ -303,7 +303,19 @@ export interface CollectionDefinition<
    * Derive fields the schema cannot: rendered HTML, reading time, excerpts.
    * The return value becomes the document type.
    */
-  transform?: (doc: InferOutput<TSchema>, ctx: TransformContext) => TOut | Promise<TOut>
+  /**
+   * Method syntax, deliberately.
+   *
+   * As a property with a function type this parameter is contravariant under
+   * `strictFunctionTypes`, so a concrete collection stops being assignable to
+   * the erased `CollectionDefinition` that `UserConfig.collections` holds —
+   * and every user with a transform gets a type error inside their own config
+   * file. `next build` type-checks the project, so it failed the build
+   * outright. Method syntax is bivariant, which is what the container needs;
+   * `defineCollection` still infers `doc` from the schema at the call site,
+   * so nothing is lost where the type actually matters.
+   */
+  transform?(doc: InferOutput<TSchema>, ctx: TransformContext): TOut | Promise<TOut>
   /**
    * Applied after the default id sort, before emission.
    *
