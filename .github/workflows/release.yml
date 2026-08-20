@@ -1,0 +1,60 @@
+name: Release
+
+# Manual only. Nothing publishes because a commit landed: a publish is
+# effectively permanent, and npm restricts unpublishing after 72 hours.
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Pack and verify without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # Required for npm trusted publishing. Classic automation tokens were
+  # permanently revoked on 2025-12-09, so there is no NPM_TOKEN anywhere in
+  # this repository and there should never be one.
+  id-token: write
+
+jobs:
+  release:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
+
+      # Trusted publishing needs npm 11.5.1 or newer; the bundled npm on the
+      # runner may be older than the Node release implies.
+      - run: npm install -g npm@latest
+      - run: npm --version
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # The same gates CI runs. A release should not be able to ship something
+      # that main would have rejected.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm check:publish
+      - run: pnpm verify:types
+
+      - name: Pack every package
+        run: pnpm -r --filter './packages/*' exec pnpm pack --pack-destination /tmp
+
+      - name: Show what would be published
+        run: |
+          for f in /tmp/*.tgz; do
+            echo "=== $(basename "$f") ==="
+            tar -tzf "$f" | sed 's/^/  /'
+          done
+
+      - name: Publish
+        if: ${{ inputs.dry-run == false }}
+        run: pnpm release

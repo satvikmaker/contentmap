@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/webpack",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "webpack and Rspack plugin for contentmap.",
   "type": "module",
   "license": "MIT",
