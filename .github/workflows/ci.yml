@@ -46,6 +46,22 @@ jobs:
       - run: pnpm build
       - run: ./scripts/fd-limit-gate.sh
 
+  adapters:
+    name: adapter parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # A real bundler, not just the plugin hooks: calling hooks in the wrong
+      # order once hid an alias that Vite rejects outright.
+      - run: node --experimental-strip-types scripts/verify-vite.mjs
+
   bench:
     name: performance gates
     runs-on: ubuntu-latest

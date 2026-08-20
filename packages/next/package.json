@@ -1,0 +1,35 @@
+{
+  "name": "@contentmap/next",
+  "version": "0.0.0",
+  "description": "Next.js integration for contentmap. Works on Turbopack and webpack.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.11.0 || >=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "contentmap": "workspace:^",
+    "next": "^13 || ^14 || ^15 || ^16"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  }
+}

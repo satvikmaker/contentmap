@@ -1,0 +1,35 @@
+{
+  "name": "@contentmap/astro",
+  "version": "0.0.0",
+  "description": "Astro content-layer loader backed by contentmap.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.11.0 || >=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "contentmap": "workspace:^",
+    "astro": "^5 || ^6 || ^7"
+  },
+  "peerDependenciesMeta": {
+    "astro": {
+      "optional": true
+    }
+  }
+}

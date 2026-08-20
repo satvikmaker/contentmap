@@ -33,3 +33,4 @@ pnpm-debug.log*
 
 docs/
 .wb-*/
+.vite-e2e-*/
