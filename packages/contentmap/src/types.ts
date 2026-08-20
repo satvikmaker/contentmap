@@ -446,8 +446,15 @@ export interface StoreEntry {
   assetDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
   /** Documents this one referenced, so editing a target invalidates it. */
   refDeps?: readonly { collection: string; id: string; digest: string }[]
-  /** Extra files that should trigger a rebuild of this document. */
-  watchFiles?: readonly string[]
+  /**
+   * External files a transform declared, with their digests.
+   *
+   * Tracked exactly like asset dependencies: they take part in `emitKey`, so a
+   * change to one produces different output and is actually written. Recording
+   * only the paths would re-run the transform and then skip the write, because
+   * the source document itself is untouched.
+   */
+  watchDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
   /**
    * Digest of everything the emitted output depends on.
    *

@@ -26,6 +26,15 @@ export interface WatchOptions {
 
 export interface WatchHandle {
   close(): Promise<void>
+  /**
+   * Recompute the watched set.
+   *
+   * Called after a config reload and after each build. A config that adds a
+   * collection introduces a directory nobody was watching, and a transform
+   * calling `addWatchFile()` names a file that only becomes known once it has
+   * run — in both cases the first build teaches us what to watch.
+   */
+  sync(config: ResolvedConfig, extra?: Iterable<string>): void
   /** Paths currently watched, for diagnostics and tests. */
   readonly paths: readonly string[]
 }
@@ -148,6 +157,21 @@ export async function startWatch(
 
   watcher.on('all', onEvent)
 
+  let current = new Set(watchPaths)
+  const sync = (next: ResolvedConfig, extra: Iterable<string> = []): void => {
+    if (closed) return
+    const wanted = new Set([...collectWatchPaths(next), ...extra])
+    for (const path of wanted) {
+      if (!current.has(path)) watcher.add(path)
+    }
+    for (const path of current) {
+      // Never unwatch a path the host gave us; it may be watching it for its
+      // own reasons.
+      if (!wanted.has(path) && owned) watcher.unwatch(path)
+    }
+    current = wanted
+  }
+
   const close = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -166,7 +190,13 @@ export async function startWatch(
 
   options.signal?.addEventListener('abort', () => void close(), { once: true })
 
-  return { close, paths: watchPaths }
+  return {
+    close,
+    sync,
+    get paths() {
+      return [...current].sort()
+    }
+  }
 }
 
 function collectWatchPaths(config: ResolvedConfig): string[] {

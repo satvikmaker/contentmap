@@ -283,3 +283,122 @@ export default defineConfig({ collections: { probe } })
     expect(doc).toContain('entryId')
   })
 })
+
+
+describe('watch mode keeps up with the config', { timeout: 60_000 }, () => {
+  fixtureTest('watches a directory a config reload introduced', async ({ fixture }) => {
+    // A collection added while the dev server runs brings a directory nobody
+    // was watching, so edits in it would never rebuild.
+    await fixture.write('contentmap.config.ts', CONFIG)
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const handle = await builder.watch({ debounce: 20 })
+    try {
+      await fixture.write('notes/n1.md', '---\ntitle: Note\n---\nx')
+      await fixture.write(
+        'contentmap.config.ts',
+        `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({ name: 'posts', directory: 'content', include: '**/*.md', schema: z.object({ title: z.string() }) })
+const notes = defineCollection({ name: 'notes', directory: 'notes', include: '**/*.md', schema: z.object({ title: z.string() }) })
+export default defineConfig({ collections: { posts, notes } })
+`
+      )
+
+      await until(async () => {
+        const index = await readFile(join(fixture.dir, '.contentmap/notes/index.js'), 'utf8')
+        expect(index).toContain('"n1"')
+      })
+      expect(handle.paths.some(p => p.endsWith('notes'))).toBe(true)
+
+      // The new directory must now be live.
+      await fixture.write('notes/n2.md', '---\ntitle: Second note\n---\nx')
+      await until(async () => {
+        const index = await readFile(join(fixture.dir, '.contentmap/notes/index.js'), 'utf8')
+        expect(index).toContain('"n2"')
+      })
+    } finally {
+      await builder.close()
+    }
+  })
+
+  fixtureTest('rebuilds when a file named by addWatchFile changes', async ({ fixture }) => {
+    // The document itself never changes on disk, so nothing else would notice.
+    await fixture.write('data/extra.txt', 'one')
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: (doc, ctx) => {
+    const path = join(process.cwd(), 'data/extra.txt')
+    ctx.addWatchFile(path)
+    return { title: doc.title, extra: readFileSync(path, 'utf8').trim() }
+  }
+})
+export default defineConfig({ collections: { posts } })
+`
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir, concurrency: 1 })
+    const cwd = process.cwd()
+    process.chdir(fixture.dir)
+    try {
+      await builder.build()
+      expect(await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')).toContain('"one"')
+
+      const handle = await builder.watch({ debounce: 20 })
+      expect(handle.paths.some(p => p.endsWith('extra.txt'))).toBe(true)
+
+      await writeFile(join(fixture.dir, 'data/extra.txt'), 'two')
+      await until(async () => {
+        const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+        expect(doc).toContain('"two"')
+      })
+    } finally {
+      process.chdir(cwd)
+      await builder.close()
+    }
+  })
+
+  fixtureTest('a builder stays usable after close', async ({ fixture }) => {
+    // close() aborts the signal loaders receive; a later build must not
+    // inherit it.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, http } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const news = defineCollection({
+  name: 'news',
+  loader: http({
+    url: 'https://x.invalid/n',
+    select: p => p.items,
+    id: r => r.slug,
+    revalidate: 'always',
+    fetch: async (_u, init) => {
+      if (init?.signal?.aborted) throw new Error('signal was already aborted')
+      return new Response(JSON.stringify({ items: [{ slug: 'a', title: 'One' }] }), { status: 200 })
+    }
+  }),
+  schema: z.object({ slug: z.string(), title: z.string() })
+})
+export default defineConfig({ collections: { news } })
+`
+    )
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    await builder.watch({ debounce: 20 })
+    await builder.close()
+
+    const again = await builder.build()
+    expect(again.errors).toBe(0)
+    expect(again.documents).toBe(1)
+  })
+})

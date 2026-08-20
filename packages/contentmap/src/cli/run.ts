@@ -288,15 +288,17 @@ async function dev(options: BuilderOptions, values: Values): Promise<number> {
     )
   }
 
-  report(await builder.build())
+  // Subscribed before the first build, not after: a late subscriber is replayed
+  // the buffered history, which would report that build a second time.
+  builder.on(event => {
+    if (event.type === 'build:end') report(event.result)
+  })
+
+  await builder.build()
   const handle = await builder.watch()
   if (!silent) {
     process.stderr.write(`${cyan('watching')} ${dim(`${handle.paths.length} path(s)`)}\n`)
   }
-
-  builder.on(event => {
-    if (event.type === 'build:end') report(event.result)
-  })
 
   // Run until interrupted. A non-zero exit here would be wrong: the first
   // build failing is a normal part of editing.

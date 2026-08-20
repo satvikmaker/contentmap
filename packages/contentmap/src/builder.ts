@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   codeFrame,
@@ -27,6 +27,7 @@ import {
   emitTypes,
   type EmitStats
 } from './write/emit.ts'
+import { withFdRetry } from './utils/fd.ts'
 import { mapLimit } from './utils/limit.ts'
 import { cacheKey, digest as digestOf, stableStringify } from './utils/digest.ts'
 import { TransformCache } from './cache/index.ts'
@@ -120,6 +121,8 @@ export class Builder {
   /** Collections currently building, so concurrent demands share one build. */
   #inFlight = new Map<string, Promise<CollectionResult>>()
   #scanned = 0
+  /** Absolute path -> collections whose documents asked to watch it. */
+  #extraWatched = new Map<string, Set<string>>()
   /** Per-document reference and watch records, harvested after each transform. */
   #refsFor = new Map<string, { collection: string; id: string; digest: string }[]>()
   #watchFor = new Map<string, string[]>()
@@ -134,6 +137,7 @@ export class Builder {
   #forced: ReadonlySet<string> | undefined
   #refreshContext: Record<string, unknown> | undefined
   #watchHandle: WatchHandle | undefined
+  /** Aborted on close; replaced per build so a closed builder can be reused. */
   #abort = new AbortController()
   #logger: Logger = {
     info: message => this.#emit({ type: 'log', level: 'info', message }),
@@ -185,6 +189,9 @@ export class Builder {
     this.#changedPaths = options.changed
     this.#forced = options.forceLoaders
     this.#refreshContext = options.refreshContext
+    // A previous close() aborted the last signal; loaders in this build must
+    // not inherit it.
+    if (this.#abort.signal.aborted) this.#abort = new AbortController()
     for (const k of Object.keys(this.phases)) delete this.phases[k]
     this.#scanned = 0
     this.#assets.reset()
@@ -261,6 +268,11 @@ export class Builder {
       cacheHits,
       diagnostics: diagnostics.items
     }
+    // Files named by addWatchFile() only become known once a transform has run,
+    // so the watched set is refreshed after every build rather than once.
+    this.#collectExtraWatched()
+    this.#watchHandle?.sync(config, this.#extraWatched.keys())
+
     this.#emit({ type: 'build:end', result })
     this.#changedPaths = undefined
     this.#forced = undefined
@@ -284,7 +296,12 @@ export class Builder {
         logger: this.#logger,
         rebuild: async (changed, reason) => {
           this.#emit({ type: 'watch:change', path: reason })
-          return await this.build({ changed: this.#toRelative(changed, config) })
+          // An external file names no document, so there is no per-document
+          // hint to pass; full discovery lets the dependency check find who
+          // depended on it.
+          const external = this.#touchesWatched(changed)
+          const relative = this.#toRelative(changed, this.#config ?? config)
+          return await this.build(external ? {} : { changed: relative })
         },
         reload: async () => {
           const previous = this.#config
@@ -300,12 +317,18 @@ export class Builder {
             return undefined
           }
           this.#resetCaches()
-          return await this.build()
+          const result = await this.build()
+          // A new collection brings a directory nobody was watching yet.
+          this.#watchHandle?.sync(this.#config!, this.#extraWatched.keys())
+          return result
         }
       },
       options
     )
     this.#watchHandle = handle
+    // A build that already ran knows which external files transforms asked to
+    // watch; the handle was created from the config alone and does not.
+    handle.sync(config, this.#extraWatched.keys())
     return handle
   }
 
@@ -327,6 +350,53 @@ export class Builder {
     this.#abort.abort()
     await this.#watchHandle?.close()
     this.#watchHandle = undefined
+  }
+
+  /**
+   * Hash the external files a transform declared.
+   *
+   * Reading them is the point: a path alone says nothing about whether the
+   * content behind it moved.
+   */
+  async #digestWatched(
+    paths: readonly string[] | undefined
+  ): Promise<{ path: string; digest: string; mtimeMs: number }[] | undefined> {
+    if (!paths || paths.length === 0) return undefined
+    const unique = [...new Set(paths)].sort()
+    const out = await mapLimit(unique, 16, async path => {
+      try {
+        const [buffer, info] = await Promise.all([
+          withFdRetry(() => readFile(path)),
+          stat(path)
+        ])
+        return { path, digest: digestOf(buffer), mtimeMs: info.mtimeMs }
+      } catch {
+        // Missing is a state like any other: recording it means the file
+        // appearing later counts as a change.
+        return { path, digest: 'missing', mtimeMs: 0 }
+      }
+    })
+    return out
+  }
+
+  /** Gather every path a transform asked to watch, and who asked. */
+  #collectExtraWatched(): void {
+    this.#extraWatched.clear()
+    for (const [name, entries] of this.#cache) {
+      for (const entry of entries) {
+        for (const { path } of entry.watchDeps ?? []) {
+          const owners = this.#extraWatched.get(path)
+          if (owners) owners.add(name)
+          else this.#extraWatched.set(path, new Set([name]))
+        }
+      }
+    }
+  }
+
+  /** Did the change touch a file some transform declared? */
+  #touchesWatched(changed: ReadonlySet<string>): boolean {
+    for (const path of changed) if (this.#extraWatched.has(path)) return true
+    return false
   }
 
   /** A watcher reports absolute paths; collections match on relative ones. */
@@ -617,6 +687,7 @@ export class Builder {
     stack: readonly string[]
   ): Promise<boolean> {
     if (entry.assetDeps?.length && (await this.#assets.changed(entry.assetDeps))) return true
+    if (entry.watchDeps?.length && (await this.#assets.changed(entry.watchDeps))) return true
     if (entry.refDeps?.length) {
       return await this.#referencesChanged(entry.refDeps, config, diagnostics, stack, collection)
     }
@@ -1336,7 +1407,7 @@ export class Builder {
       const owned = this.#assets.ownedBy(ownerId)
       const assetDeps = owned.length === 0 ? undefined : this.#assets.dependencies(ownerId)
       const refDeps = dedupeRefs(this.#refsFor.get(ownerId))
-      const watchFiles = this.#watchFor.get(ownerId)
+      const watchDeps = await this.#digestWatched(this.#watchFor.get(ownerId))
       this.#refsFor.delete(ownerId)
       this.#watchFor.delete(ownerId)
 
@@ -1349,14 +1420,15 @@ export class Builder {
         emitKey: cacheKey(
           file.digest,
           ...(assetDeps ?? []).map(d => d.digest),
-          ...(refDeps ?? []).map(r => `${r.collection}/${r.id}@${r.digest}`)
+          ...(refDeps ?? []).map(r => `${r.collection}/${r.id}@${r.digest}`),
+          ...(watchDeps ?? []).map(w => `${w.path}@${w.digest}`)
         ),
         data,
         meta: pending.meta,
         mtimeMs: file.mtimeMs,
         ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
         ...(refDeps === undefined ? {} : { refDeps }),
-        ...(watchFiles === undefined || watchFiles.length === 0 ? {} : { watchFiles })
+        ...(watchDeps === undefined ? {} : { watchDeps })
       })
     }
     return out
