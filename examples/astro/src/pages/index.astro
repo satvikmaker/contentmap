@@ -1,0 +1,15 @@
+---
+import { getCollection } from 'astro:content'
+
+const posts = (await getCollection('posts')).sort(
+  (a, b) => Number(new Date(b.data.date)) - Number(new Date(a.data.date))
+)
+---
+<html>
+  <body>
+    <h1>Posts</h1>
+    <ul>
+      {posts.map(post => <li data-slug={post.data.slug}>{post.data.title}</li>)}
+    </ul>
+  </body>
+</html>

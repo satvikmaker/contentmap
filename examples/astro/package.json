@@ -1,0 +1,16 @@
+{
+  "name": "@contentmap-example/astro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@contentmap/astro": "workspace:*",
+    "contentmap": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "astro": "^5.16.2"
+  }
+}

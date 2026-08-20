@@ -39,3 +39,9 @@ bench-results.json
 
 # copied from the repo root by prepack; never edited in place
 packages/contentmap/README.md
+examples/*/dist
+examples/*/.contentmap
+examples/*/.astro
+examples/*/.next
+examples/*/.nuxt
+examples/*/.output

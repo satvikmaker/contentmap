@@ -40,6 +40,39 @@ export interface LoadedModule {
  * multi-arch Docker and read-only node_modules — purely to get a dependency
  * graph we can obtain by scanning relative imports.
  */
+/**
+ * A dynamic import the bundler cannot see, used only to escape one specific
+ * failure.
+ *
+ * Vite's SSR transform rewrites a plain `import()` into its module-runner
+ * shim. That is usually harmless and even useful, but Astro syncs content
+ * after tearing the runner down, so resolving the user's config through it
+ * fails with "Vite module runner has been closed". The condition needs
+ * contentmap to be processed rather than externalised — a linked workspace
+ * package, or an explicit `ssr.noExternal`.
+ *
+ * A dynamic import inside `new Function` is opaque to static analysis, so no
+ * bundler touches it. It is not the default path: code compiled this way runs
+ * in the realm's own scope, and a vm context with no `importModuleDynamically`
+ * hook rejects every dynamic import in it. Vitest runs modules exactly that
+ * way, so making this the default traded an Astro bug for a broken test suite.
+ * Build-time only, and absent from the runtime package that ships to clients —
+ * that one contains no eval at all.
+ */
+const compiledImport: ((specifier: string) => Promise<unknown>) | undefined = (() => {
+  try {
+    return new Function('u', 'return import(u)') as (s: string) => Promise<unknown>
+  } catch {
+    return undefined // a CSP forbidding `new Function`
+  }
+})()
+
+/** The bundler's module graph is gone, not the user's config being wrong. */
+function isDeadModuleRunner(error: unknown): boolean {
+  const message = (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && message.includes('module runner has been closed')
+}
+
 export async function loadModule(path: string): Promise<LoadedModule> {
   const abs = isAbsolute(path) ? path : resolve(path)
   const source = await readFile(abs, 'utf8')
@@ -55,6 +88,14 @@ export async function loadModule(path: string): Promise<LoadedModule> {
     const mod: unknown = await import(url)
     return { value: unwrap(mod), deps, digest, loader: 'native' }
   } catch (error) {
+    // Retry outside the bundler's graph before deciding anything is wrong with
+    // the config. Only for a runner that has already shut down: any other
+    // failure is the real answer and retrying it just produces a second,
+    // more confusing error.
+    if (isDeadModuleRunner(error) && compiledImport !== undefined) {
+      const mod: unknown = await compiledImport(url)
+      return { value: unwrap(mod), deps, digest, loader: 'native' }
+    }
     if (!isRecoverable(error)) throw error
     const { createJiti } = await import('jiti')
     const jiti = createJiti(import.meta.url, { tsconfigPaths: true, interopDefault: true })
