@@ -94,10 +94,20 @@ try {
     console.log('!  Timing gates reported as INCONCLUSIVE. Re-run on an idle machine.')
   }
 
+  // Wall-clock budgets do not travel between machines. The defaults are
+  // calibrated on a developer laptop; a 4-core shared CI runner measured cold
+  // 2125ms and rescan 396ms on the very same commit, so the 150ms rescan gate
+  // failed on hardware, not on a regression. Overridable so CI can state its
+  // own ceilings instead of pretending one number fits both.
+  const budget = (name, fallback) => Number(process.env[name] ?? fallback)
+  const COLD = budget('BENCH_COLD_MS', 5000)
+  const RESCAN = budget('BENCH_RESCAN_MS', 150)
+  const RSS = budget('BENCH_RSS_MB', 400)
+
   const gates = [
-    ['cold < 5000ms', coldMs < 5000, true],
-    ['rescan < 150ms', warmMs < 150, true],
-    ['rss < 400MB', rss < 400, false]
+    [`cold < ${COLD}ms`, coldMs < COLD, true],
+    [`rescan < ${RESCAN}ms`, warmMs < RESCAN, true],
+    [`rss < ${RSS}MB`, rss < RSS, false]
   ]
   let ok = true
   for (const [label, pass, timing = true] of gates) {

@@ -139,7 +139,13 @@ describe('correctness guarantees', () => {
     expect(result.documents).toBe(1)
   })
 
-  fixtureTest('reports read failures rather than silently dropping them', async ({ fixture }) => {
+  // chmod(0o000) does not make a file unreadable on Windows — it maps to the
+  // read-only attribute, which still permits reads — so the read this asserts
+  // on simply succeeds there. The guarantee still holds on Windows; only this
+  // way of provoking it does not exist.
+  fixtureTest.skipIf(process.platform === 'win32')(
+    'reports read failures rather than silently dropping them',
+    async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))
     await fixture.write('content/ok.md', '---\ntitle: OK\ndate: 2026-01-01\n---\nx')
     // An unreadable file matches the glob but fails to read — the same shape as
@@ -150,7 +156,8 @@ describe('correctness guarantees', () => {
     const result = await createBuilder({ root: fixture.dir }).build()
     expect(result.errors).toBeGreaterThan(0)
     expect(result.diagnostics.some(d => d.code === 'CM_READ')).toBe(true)
-  })
+    }
+  )
 
   fixtureTest('replays events to a late subscriber', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))

@@ -28,8 +28,34 @@ export default defineConfig({ collections: { posts } })
  */
 const WINDOW = 30_000
 
-const until = async (fn: () => Promise<void> | void): Promise<void> =>
-  vi.waitFor(fn, { timeout: WINDOW, interval: 25 })
+const until = async (
+  fn: () => Promise<void> | void,
+  context?: () => string
+): Promise<void> => {
+  try {
+    await vi.waitFor(fn, { timeout: WINDOW, interval: 25 })
+  } catch (error) {
+    // A timeout says only "it never became true", which cannot distinguish a
+    // watcher that saw nothing from a rebuild that ran and wrote the wrong
+    // thing. Both failed identically in CI on Windows and macOS, with the same
+    // message either way.
+    if (!context) throw error
+    throw new Error(`${(error as Error).message}\n\nwatcher activity:\n${context()}`)
+  }
+}
+
+/** Records what the builder saw, so a timeout can say which half broke. */
+function record(builder: ReturnType<typeof createBuilder>): () => string {
+  const seen: string[] = []
+  builder.on(event => {
+    if (event.type === 'watch:change') seen.push(`  change ${event.path}`)
+    if (event.type === 'build:start') seen.push('  build:start')
+    if (event.type === 'build:end') {
+      seen.push(`  build:end  ${event.result.documents} doc(s), ${event.result.errors} error(s)`)
+    }
+  })
+  return () => (seen.length === 0 ? '  (nothing — the watcher never fired)' : seen.join('\n'))
+}
 
 describe('watch mode', { timeout: 60_000 }, () => {
   fixtureTest('rebuilds when a file changes', async ({ fixture }) => {
@@ -84,6 +110,7 @@ describe('watch mode', { timeout: 60_000 }, () => {
 
     const builder = createBuilder({ root: fixture.dir })
     await builder.build()
+    const activity = record(builder)
 
     let builds = 0
     let inflight = 0
@@ -110,7 +137,7 @@ describe('watch mode', { timeout: 60_000 }, () => {
       await until(async () => {
           const doc = await readFile(join(fixture.dir, '.contentmap/posts/p19.js'), 'utf8')
           expect(doc).toContain('Edited 19')
-      })
+      }, activity)
 
       expect(peak, 'builds must never overlap').toBe(1)
       const rebuilds = builds - baseline
@@ -348,6 +375,7 @@ export default defineConfig({ collections: { posts } })
     await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
 
     const builder = createBuilder({ root: fixture.dir, concurrency: 1 })
+    const activity = record(builder)
     const cwd = process.cwd()
     process.chdir(fixture.dir)
     try {
@@ -361,7 +389,7 @@ export default defineConfig({ collections: { posts } })
       await until(async () => {
         const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
         expect(doc).toContain('"two"')
-      })
+      }, activity)
     } finally {
       process.chdir(cwd)
       await builder.close()
