@@ -117,16 +117,18 @@ Two honest notes on this table.
 
 ## Framework setup
 
-| Framework | Package | Setup |
-|---|---|---|
-| Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start, Analog | `@contentmap/vite` | add `contentmap()` to `plugins` |
-| Next.js (Turbopack and webpack) | `@contentmap/next` | wrap with `withContentmap()` |
-| Nuxt | `@contentmap/nuxt` | add to `modules` |
-| Astro | `@contentmap/astro` | use `contentmapLoader()` as a collection loader |
-| webpack / Rspack | `@contentmap/webpack` | add `new ContentmapWebpackPlugin()` |
-| Angular CLI | — | no plugin array exists; run `contentmap build` from `prebuild` |
+| Framework | Package | Setup | Proven by |
+|---|---|---|---|
+| Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start, Analog | `@contentmap/vite` | add `contentmap()` to `plugins` | a real `vite build` |
+| Next.js (Turbopack and webpack) | `@contentmap/next` | wrap with `withContentmap()` | [`examples/next`](examples/next) |
+| Nuxt | `@contentmap/nuxt` | add to `modules` | [`examples/nuxt`](examples/nuxt) |
+| Astro | `@contentmap/astro` | use `contentmapLoader()` as a collection loader | [`examples/astro`](examples/astro) |
+| webpack / Rspack | `@contentmap/webpack` | add `new ContentmapWebpackPlugin()` | [`examples/webpack`](examples/webpack) |
+| Angular CLI | — | no plugin array exists; run `contentmap build` from `prebuild` | not yet |
 
 Every adapter is a convenience. `contentmap build` produces identical output, and CI proves it — which is what keeps the tool alive when a bundler drops plugin support, as Turbopack did to Contentlayer.
+
+`pnpm verify:examples` builds all four applications with their real toolchains. That gate is not decoration: writing those four examples turned up four bugs that every hook-level test had passed straight over, including a Nuxt module that never ran and an Astro build that could not start.
 
 ## CLI
 
@@ -179,7 +181,7 @@ Grouped by kind, then by file, with a corpus-level summary. Every diagnostic nam
 
 ## Status
 
-Implemented and tested: the build pipeline, diagnostics, pluggable renderers, transforms, assets and image placeholders, cross-collection references, a persistent transform cache, remote sources, watch mode, and five framework adapters. 243 tests.
+Implemented and tested: the build pipeline, diagnostics, pluggable renderers, transforms, assets and image placeholders, cross-collection references, a persistent transform cache, remote sources, watch mode, and five framework adapters — each of the five now proven against its real toolchain. 254 tests.
 
 Not done:
 

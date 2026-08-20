@@ -1,7 +1,11 @@
+import { resolve } from 'node:path'
 import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
 
 interface CompilerLike {
-  options?: { mode?: string }
+  options?: {
+    mode?: string
+    resolve?: { alias?: Record<string, string | false | string[]> }
+  }
   hooks: {
     beforeCompile: { tapPromise(name: string, fn: () => Promise<void>): void }
     shutdown?: { tapPromise(name: string, fn: () => Promise<void>): void }
@@ -39,6 +43,18 @@ export class ContentmapWebpackPlugin {
   apply(compiler: CompilerLike): void {
     const { watch = true, ...builderOptions } = this.#options
 
+    // Register the alias, as the Vite plugin and the Nuxt module do. webpack
+    // does not read tsconfig paths, so without this every project has to
+    // repeat the same resolve.alias entry by hand — and `contentmap/generated`
+    // looks enough like a real package subpath that the failure is "Module not
+    // found", which points at nothing. Set before the build so the very first
+    // compilation can resolve it.
+    if (compiler.options) {
+      const resolve = (compiler.options.resolve ??= {})
+      const alias = (resolve.alias ??= {})
+      alias['contentmap/generated'] ??= resolveGeneratedDir(builderOptions)
+    }
+
     compiler.hooks.beforeCompile.tapPromise('contentmap', async () => {
       ContentmapWebpackPlugin.#started ??= (async () => {
         const builder = createBuilder(builderOptions)
@@ -57,6 +73,18 @@ export class ContentmapWebpackPlugin {
       ContentmapWebpackPlugin.#started = undefined
     })
   }
+}
+
+/**
+ * Where the generated output will land, without resolving the config.
+ *
+ * `apply()` is synchronous, and reading the config is not, so this mirrors the
+ * same defaulting the resolver uses. An explicit `outDir` wins; otherwise it is
+ * `.contentmap` under the project root, which is the default the CLI, the
+ * scaffolder and the tsconfig path all already assume.
+ */
+function resolveGeneratedDir(options: BuilderOptions): string {
+  return resolve(options.root ?? process.cwd(), options.outDir ?? '.contentmap')
 }
 
 export default ContentmapWebpackPlugin

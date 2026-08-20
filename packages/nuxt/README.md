@@ -27,12 +27,24 @@ import { posts } from 'contentmap/generated'
 
 ## Options
 
+Either through the `contentmap` config key:
+
 ```ts
 export default defineNuxtConfig({
   modules: ['@contentmap/nuxt'],
   contentmap: {
     config: 'contentmap.config.ts'
   }
+})
+```
+
+or by passing them in code:
+
+```ts
+import { contentmapModule } from '@contentmap/nuxt'
+
+export default defineNuxtConfig({
+  modules: [contentmapModule({ config: 'contentmap.config.ts' })]
 })
 ```
 

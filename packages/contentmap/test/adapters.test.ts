@@ -233,6 +233,37 @@ describe('nuxt module', () => {
 })
 
 describe('webpack plugin', () => {
+  fixtureTest('registers the generated alias, as the other adapters do', async ({ fixture }) => {
+    // webpack does not read tsconfig paths, so without this every project
+    // repeats the same resolve.alias by hand — and `contentmap/generated`
+    // looks enough like a real package subpath that the failure is "Module not
+    // found", which points at nothing.
+    const compiler = {
+      options: { mode: 'production' as const, resolve: {} as { alias?: Record<string, string> } },
+      hooks: { beforeCompile: { tapPromise: () => {} } }
+    }
+
+    new ContentmapWebpackPlugin({ root: fixture.dir }).apply(compiler as never)
+
+    expect(compiler.options.resolve.alias?.['contentmap/generated']).toBe(
+      join(fixture.dir, '.contentmap')
+    )
+  })
+
+  fixtureTest('never overwrites an alias the project set itself', async ({ fixture }) => {
+    const compiler = {
+      options: {
+        mode: 'production' as const,
+        resolve: { alias: { 'contentmap/generated': '/somewhere/else' } }
+      },
+      hooks: { beforeCompile: { tapPromise: () => {} } }
+    }
+
+    new ContentmapWebpackPlugin({ root: fixture.dir }).apply(compiler as never)
+
+    expect(compiler.options.resolve.alias['contentmap/generated']).toBe('/somewhere/else')
+  })
+
   fixtureTest('builds once across the node, edge and client compilers', async ({ fixture }) => {
     await seed(fixture)
     let calls = 0

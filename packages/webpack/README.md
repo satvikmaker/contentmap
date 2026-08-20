@@ -23,6 +23,12 @@ module.exports = {
 
 Content builds before the first compilation and rebuilds in watch mode. Rspack uses the same plugin — the hooks are compatible.
 
+The plugin registers the `contentmap/generated` alias for you, because webpack does not read tsconfig paths. An alias you set yourself is never overwritten.
+
+```js
+import { posts } from 'contentmap/generated'
+```
+
 ## Options
 
 ```js
