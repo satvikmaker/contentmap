@@ -6,6 +6,7 @@ import { contentmap as vitePlugin } from '../../vite/src/index.ts'
 import { withContentmap } from '../../next/src/index.ts'
 import { contentmapModule } from '../../nuxt/src/index.ts'
 import { ContentmapWebpackPlugin } from '../../webpack/src/index.ts'
+import { contentmapLoader } from '../../astro/src/index.ts'
 import { createBuilder } from '../src/builder.ts'
 import { fixtureTest } from './helpers.ts'
 
@@ -221,5 +222,98 @@ describe('webpack plugin', () => {
     expect(index).toContain('"a"')
     // Three compilers, one build. contentlayer's hook fires three times.
     expect(hooks).toHaveLength(3)
+  })
+})
+
+
+describe('adapter lifecycles', () => {
+  fixtureTest('one environment finishing does not disturb another', async ({ fixture }) => {
+    // Vite 6+ runs a build per environment, so buildEnd fires more than once.
+    // Tearing the builder down on the first would abort work the others are
+    // still doing.
+    await seed(fixture)
+    const plugin = vitePlugin({ root: fixture.dir })
+    await plugin.config?.({ root: fixture.dir })
+    await plugin.configResolved?.({ root: fixture.dir, command: 'build' })
+    await plugin.buildEnd?.()
+
+    await expect(
+      plugin.configResolved?.({ root: fixture.dir, command: 'build' })
+    ).resolves.not.toThrow()
+    const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+    expect(index).toContain('"a"')
+  })
+
+  fixtureTest('a config evaluated twice still builds once', async ({ fixture }) => {
+    // SvelteKit evaluates the whole Vite config twice, which calls the plugin
+    // factory twice. A guard held in one instance's closure does not span them.
+    await seed(fixture)
+    let builds = 0
+    const observer = createBuilder({ root: fixture.dir })
+    observer.on(e => {
+      if (e.type === 'build:start') builds++
+    })
+
+    const first = vitePlugin({ root: fixture.dir })
+    const second = vitePlugin({ root: fixture.dir })
+    await Promise.all([
+      (async () => {
+        await first.config?.({ root: fixture.dir })
+        await first.configResolved?.({ root: fixture.dir, command: 'build' })
+      })(),
+      (async () => {
+        await second.config?.({ root: fixture.dir })
+        await second.configResolved?.({ root: fixture.dir, command: 'build' })
+      })()
+    ])
+
+    const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
+    expect(index).toContain('"a"')
+    await observer.close()
+  })
+
+  fixtureTest('the astro loader builds once for several collections', async ({ fixture }) => {
+    // Astro calls load() per collection. Building the whole project each time
+    // means N full builds for N collections.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const schema = z.object({ title: z.string() })
+const posts = defineCollection({ name: 'posts', directory: 'content', include: '**/*.md', schema })
+const notes = defineCollection({ name: 'notes', directory: 'content', include: '**/*.md', schema })
+export default defineConfig({ collections: { posts, notes } })
+`
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    let builds = 0
+    const stored: string[] = []
+    const context = (collection: string) => ({
+      collection,
+      store: {
+        clear() {},
+        set(entry: { id: string }) {
+          stored.push(`${collection}:${entry.id}`)
+        }
+      },
+      logger: {
+        info(message: string) {
+          if (message.includes('document')) builds++
+        },
+        warn() {}
+      },
+      parseData: async ({ data }: { data: Record<string, unknown> }) => data,
+      generateDigest: () => 'digest'
+    })
+
+    const loader = contentmapLoader({ root: fixture.dir })
+    await loader.load(context('posts') as never)
+    await loader.load(context('notes') as never)
+
+    expect(stored).toEqual(['posts:a', 'notes:a'])
+    expect(builds).toBe(2)
+    // Two collections must not cost two full builds of the whole project.
+    expect(loader.buildCount).toBe(1)
   })
 })

@@ -57,14 +57,22 @@ export interface VitePluginLike {
  * working answer for Turbopack was running its CLI beside the dev server, and
  * that worked precisely because its CLI was independent.
  */
+/**
+ * Shared across plugin instances, keyed by config path.
+ *
+ * A closure is not enough: SvelteKit evaluates the whole Vite config twice,
+ * which calls this factory twice and produces two independent instances. Only
+ * module state spans them.
+ */
+const sessions = new Map<string, { builder: Builder; build: Promise<void>; refs: number }>()
+
 export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLike {
   const { isEnabled, logging = true, ...builderOptions } = options
   let builder: Builder | undefined
   let generatedDir: string | undefined
-  // One build per process, not per environment. Vite 6 runs a plugin instance
-  // for each environment, and SvelteKit evaluates the whole config twice.
-  let started: Promise<void> | undefined
+  let sessionKey: string | undefined
   let enabled = true
+  let held = false
 
   const plugin: VitePluginLike = {
     name: 'contentmap',
@@ -79,8 +87,18 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
         builderOptions.root ??
         (userConfig as { root?: string } | undefined)?.root ??
         process.cwd()
-      builder ??= createBuilder({ ...builderOptions, root })
-      generatedDir = (await builder.resolve()).output.dir
+      const probe = createBuilder({ ...builderOptions, root })
+      const resolved = await probe.resolve()
+      generatedDir = resolved.output.dir
+      sessionKey = resolved.configPath
+
+      const existing = sessions.get(sessionKey)
+      if (existing) {
+        builder = existing.builder
+        await probe.close()
+      } else {
+        builder = probe
+      }
 
       // Returned even when the build is disabled: a disabled instance still has
       // to resolve the generated module, or imports fail in that environment.
@@ -103,30 +121,50 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
 
     async configResolved(config: ResolvedViteConfig) {
       enabled = isEnabled ? isEnabled(config) : true
-      builder ??= createBuilder({ root: config.root, ...builderOptions })
-      generatedDir ??= (await builder.resolve()).output.dir
+      if (!builder || !sessionKey) {
+        builder = createBuilder({ ...builderOptions, root: builderOptions.root ?? config.root })
+        const resolved = await builder.resolve()
+        generatedDir ??= resolved.output.dir
+        sessionKey = resolved.configPath
+      }
 
       // Patch, never replace. SvelteKit sets its own allow list, and
       // overwriting it makes the dev server return 403 for its own files.
+      const outDir = generatedDir
       const fs = (config.server ??= {}).fs ??= {}
-      if (Array.isArray(fs.allow) && !fs.allow.includes(generatedDir)) {
-        fs.allow.push(generatedDir)
+      if (outDir && Array.isArray(fs.allow) && !fs.allow.includes(outDir)) {
+        fs.allow.push(outDir)
       }
 
       if (!enabled) return
+
       // configResolved, not buildStart: buildStart fires once per environment.
-      started ??= builder.build().then(() => undefined)
-      await started
+      const key = sessionKey
+      const session = sessions.get(key) ?? {
+        builder,
+        build: builder.build().then(() => undefined),
+        refs: 0
+      }
+      sessions.set(key, session)
+      if (!held) {
+        session.refs += 1
+        held = true
+      }
+      await session.build
     },
 
     async configureServer(server: ViteServerLike) {
       if (!enabled || !builder) return
 
       // Vite already watches the project. A second watcher doubles the handles
-      // and delivers two events per edit.
-      const handle = await builder.watch({
-        watcher: server.watcher as never
-      })
+      // and delivers two events per edit. Vite 8's is still chokidar-shaped,
+      // but a host that is not gets our own rather than a crash.
+      const usable = ['on', 'off', 'add', 'unwatch'].every(
+        m => typeof (server.watcher as unknown as Record<string, unknown>)[m] === 'function'
+      )
+      const handle = await builder.watch(
+        usable ? { watcher: server.watcher as never } : {}
+      )
 
       builder.on(event => {
         if (event.type !== 'build:end') return
@@ -144,7 +182,17 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
     },
 
     async buildEnd() {
-      await builder?.close()
+      // Reference-counted, because Vite 6+ runs a build per environment and so
+      // calls this more than once. Tearing the builder down on the first would
+      // abort work the remaining environments are still doing.
+      if (!held || !sessionKey) return
+      held = false
+      const session = sessions.get(sessionKey)
+      if (!session) return
+      session.refs -= 1
+      if (session.refs > 0) return
+      sessions.delete(sessionKey)
+      await session.builder.close()
     }
   }
   return plugin

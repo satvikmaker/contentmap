@@ -54,6 +54,7 @@ export {
 } from './assets/index.ts'
 export { MissingImageProcessorError } from './render/context.ts'
 
+export type { AnyDocument } from './types.ts'
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
 export type { HasUnserializable, InvalidType, NotSerializable } from './types.ts'
 export type { ModuleLoader, Query } from './runtime/index.ts'

@@ -346,6 +346,25 @@ export class Builder {
     })
   }
 
+  /**
+   * Documents the last build produced for a collection.
+   *
+   * For programmatic consumers — an Astro loader, a search-index script, a
+   * test — that already hold the builder. Reading the emitted module back
+   * through Node instead would make them depend on `contentmap` being
+   * resolvable from the output directory, which is a needless constraint when
+   * the data is right here.
+   */
+  documentsOf(collection: string): AnyDocument[] {
+    const built = this.#built.get(collection) ?? { entries: this.#cache.get(collection) ?? [] }
+    return built.entries.map(toDocument)
+  }
+
+  /** Names of the collections the last build produced. */
+  collectionNames(): string[] {
+    return [...this.#cache.keys()].sort()
+  }
+
   async close(): Promise<void> {
     this.#abort.abort()
     await this.#watchHandle?.close()

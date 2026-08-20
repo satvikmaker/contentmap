@@ -1,8 +1,10 @@
-import { createBuilder, type BuilderOptions } from 'contentmap'
+import { createBuilder, type AnyDocument, type BuilderOptions } from 'contentmap'
 
 /** The slice of Astro's loader context this loader uses. */
-interface AstroLoaderContext {
+export interface AstroLoaderContext {
   collection: string
+  /** Present when Astro is refreshing on demand rather than syncing. */
+  refreshContextData?: Record<string, unknown>
   store: {
     clear(): void
     set(entry: { id: string; data: Record<string, unknown>; body?: string; digest?: string }): void
@@ -18,6 +20,26 @@ export interface AstroLoaderOptions extends BuilderOptions {
   collection?: string
 }
 
+interface Session {
+  builder: ReturnType<typeof createBuilder>
+  build: Promise<void>
+  builds: number
+}
+
+/**
+ * Shared across loader instances, keyed by config path.
+ *
+ * Astro calls `load()` once per collection, and a project declares one loader
+ * per collection, so each gets its own instance. Building inside each of them
+ * means N full builds of the whole project for N collections.
+ */
+const sessions = new Map<string, Session>()
+
+/** Builds performed for a config path. Exposed for tests and diagnostics. */
+export function buildCountFor(configPath: string): number {
+  return sessions.get(configPath)?.builds ?? 0
+}
+
 /**
  * Expose a contentmap collection to Astro's content layer.
  *
@@ -26,62 +48,93 @@ export interface AstroLoaderOptions extends BuilderOptions {
  * the best design in this space. Reimplementing any of it would mean two
  * sources of truth inside one project.
  */
-export function contentmapLoader(options: AstroLoaderOptions = {}) {
-  const { collection: collectionName, ...builderOptions } = options
-  return {
-    name: 'contentmap',
-    async load(context: AstroLoaderContext): Promise<void> {
-      const builder = createBuilder(builderOptions)
-      const name = collectionName ?? context.collection
-      try {
-        const result = await builder.build()
-        for (const diagnostic of result.diagnostics) {
-          if (diagnostic.severity === 'error') {
-            context.logger.warn(`${diagnostic.file ?? ''} ${diagnostic.message}`.trim())
-          }
-        }
+export interface ContentmapAstroLoader {
+  name: string
+  /** Builds performed for this loader's config path. */
+  readonly buildCount: number
+  load(context: AstroLoaderContext): Promise<void>
+}
 
-        const documents = await readCollection(builder, name)
-        context.store.clear()
-        for (const doc of documents) {
-          const meta = doc['_meta'] as { id: string } | undefined
-          const id = meta?.id ?? String(doc['id'] ?? '')
-          const data = await context.parseData({ id, data: doc })
-          context.store.set({ id, data, digest: context.generateDigest(doc) })
+export function contentmapLoader(options: AstroLoaderOptions = {}): ContentmapAstroLoader {
+  const { collection: collectionName, ...builderOptions } = options
+  const loader = {
+    name: 'contentmap',
+    /** Builds this loader's config path has performed. */
+    get buildCount(): number {
+      return key === undefined ? 0 : buildCountFor(key)
+    },
+    async load(context: AstroLoaderContext): Promise<void> {
+      const name = collectionName ?? context.collection
+      const session = await acquire(builderOptions, Boolean(context.refreshContextData))
+
+      const result = await session.build.then(() => session.last!)
+      for (const diagnostic of result.diagnostics) {
+        if (diagnostic.severity === 'error') {
+          context.logger.warn(`${diagnostic.file ?? ''} ${diagnostic.message}`.trim())
         }
-        context.logger.info(`contentmap: ${documents.length} document(s) in "${name}"`)
-      } finally {
-        await builder.close()
       }
+
+      const documents = session.builder.documentsOf(name)
+      if (documents.length === 0 && !session.builder.collectionNames().includes(name)) {
+        throw new Error(
+          `contentmap: no collection named "${name}". Known: ${session.builder.collectionNames().join(', ') || '(none)'}`
+        )
+      }
+      context.store.clear()
+      for (const doc of documents as AnyDocument[]) {
+        const meta = doc['_meta'] as { id: string } | undefined
+        const id = meta?.id ?? String(doc['id'] ?? '')
+        const data = await context.parseData({ id, data: doc })
+        context.store.set({ id, data, digest: context.generateDigest(doc) })
+      }
+      context.logger.info(`contentmap: ${documents.length} document(s) in "${name}"`)
     }
   }
-}
 
-/**
- * Read a built collection back out of the generated output.
- *
- * Via the emitted module rather than internal state, so this loader consumes
- * exactly what every other consumer does.
- */
-async function readCollection(
-  builder: ReturnType<typeof createBuilder>,
-  name: string
-): Promise<Record<string, unknown>[]> {
-  const config = await builder.resolve()
-  const url = `${config.output.dir}/${name}/index.js`
-  const mod: Record<string, unknown> = await import(
-    /* @vite-ignore */ `${pathToFileUrl(url)}?t=${Date.now()}`
-  )
-  const query = (mod[name] ?? mod['default']) as
-    | { all(): Record<string, unknown>[] }
-    | Record<string, unknown>[]
-    | undefined
-  if (!query) throw new Error(`contentmap: collection "${name}" is not in the generated output`)
-  return Array.isArray(query) ? query : query.all()
-}
+  let key: string | undefined
 
-function pathToFileUrl(path: string): string {
-  return path.startsWith('file://') ? path : `file://${path}`
+  /**
+   * One build per sync, shared by every collection.
+   *
+   * An explicit refresh — Astro passing `refreshContextData` — starts a new
+   * one, because that is the caller saying the content has moved.
+   */
+  async function acquire(
+    builderOptions: BuilderOptions,
+    refresh: boolean
+  ): Promise<Session & { last?: Awaited<ReturnType<ReturnType<typeof createBuilder>['build']>> }> {
+    const probe = createBuilder(builderOptions)
+    const configPath = (await probe.resolve()).configPath
+    key = configPath
+
+    const existing = sessions.get(configPath) as
+      | (Session & { last?: Awaited<ReturnType<ReturnType<typeof createBuilder>['build']>> })
+      | undefined
+
+    if (existing && !refresh) {
+      await probe.close()
+      return existing
+    }
+
+    const builder = existing?.builder ?? probe
+    if (existing) await probe.close()
+
+    const session = {
+      builder,
+      builds: (existing?.builds ?? 0) + 1,
+      last: undefined as never,
+      build: Promise.resolve()
+    } as Session & { last?: Awaited<ReturnType<ReturnType<typeof createBuilder>['build']>> }
+
+    session.build = builder.build().then(result => {
+      session.last = result
+    })
+    sessions.set(configPath, session)
+    await session.build
+    return session
+  }
+
+  return loader
 }
 
 export default contentmapLoader
