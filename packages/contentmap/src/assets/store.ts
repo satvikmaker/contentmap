@@ -110,7 +110,12 @@ export class AssetStore {
     for (const name of this.#owners.get(documentId) ?? []) {
       const entry = this.#entries.get(name)
       if (entry) {
-        out.push({ path: entry.sourcePath, digest: entry.digest, mtimeMs: entry.mtimeMs })
+        out.push({
+          path: entry.sourcePath,
+          digest: entry.digest,
+          mtimeMs: entry.mtimeMs,
+          size: entry.size
+        })
       }
     }
     return out.sort((a, b) => a.path.localeCompare(b.path))
@@ -128,15 +133,20 @@ export class AssetStore {
   /**
    * Has any of these files changed on disk?
    *
-   * mtime first, because it is one stat against a read plus a hash; the digest
-   * is only consulted when mtime moved, so a touched-but-identical file does
-   * not invalidate anything.
+   * mtime and size first, because that is one stat against a read plus a hash;
+   * the digest is only consulted when either moved, so a touched-but-identical
+   * file does not invalidate anything.
+   *
+   * Size is checked alongside mtime for the same reason the source collector
+   * does it: mtime has millisecond resolution, and an image replaced within the
+   * same millisecond would otherwise be called unchanged and the document never
+   * rebuilt. Free from the stat already made.
    */
   async changed(deps: readonly AssetDependency[]): Promise<boolean> {
     for (const dep of deps) {
       const info = await stat(dep.path).catch(() => undefined)
       if (!info) return true
-      if (info.mtimeMs === dep.mtimeMs) continue
+      if (info.mtimeMs === dep.mtimeMs && info.size === dep.size) continue
       const buffer = await withFdRetry(() => readFile(dep.path)).catch(() => undefined)
       if (!buffer || hashOf(buffer) !== dep.digest) return true
     }
@@ -226,6 +236,8 @@ export interface AssetDependency {
   path: string
   digest: string
   mtimeMs: number
+  /** Paired with mtimeMs so a same-millisecond replacement is still seen. */
+  size: number
 }
 
 export type { Entry as AssetEntry }

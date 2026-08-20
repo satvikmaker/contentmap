@@ -19,6 +19,7 @@ export interface SourceFile {
   content: string
   digest: string
   mtimeMs: number
+  size: number
 }
 
 export interface ReadFailure {
@@ -36,6 +37,7 @@ export interface CollectResult {
 
 export interface PreviousState {
   mtimeMs: number
+  size: number
   digest: string
 }
 
@@ -122,7 +124,15 @@ export async function collectFiles(
       // and two saves inside the same millisecond are perfectly ordinary while
       // editing — trusting mtime over the watcher there silently drops the
       // edit, and the rebuild never happens.
-      if (!named && prior && prior.mtimeMs === info.mtimeMs) {
+      //
+      // Size is compared too, because without a watcher there is nothing else
+      // to appeal to and mtime alone will call a same-millisecond rewrite
+      // unchanged. It comes free from the stat already made. It narrows the
+      // window rather than closing it: an edit that lands in the same
+      // millisecond AND keeps the byte count identical still slips through,
+      // and only reading every file would catch that — which is the cost this
+      // prefilter exists to avoid.
+      if (!named && prior && prior.mtimeMs === info.mtimeMs && prior.size === info.size) {
         return { kind: 'unchanged' as const, relativePath }
       }
       const content = await withFdRetry(() => readFile(absolutePath, 'utf8'))
@@ -134,7 +144,8 @@ export async function collectFiles(
           extension: extname(relative),
           content,
           digest: digest(content),
-          mtimeMs: info.mtimeMs
+          mtimeMs: info.mtimeMs,
+          size: info.size
         }
       }
     } catch (error) {

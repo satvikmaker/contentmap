@@ -462,10 +462,12 @@ export interface StoreEntry {
   data: Record<string, unknown>
   meta: DocumentMeta
   mtimeMs: number
+  /** Byte length, paired with mtimeMs so a same-millisecond rewrite is seen. */
+  size: number
   /** Emitted asset filenames this document owns. */
   assets?: readonly string[]
   /** Files this document referenced, so a changed asset invalidates it. */
-  assetDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
+  assetDeps?: readonly { path: string; digest: string; mtimeMs: number; size: number }[]
   /** Documents this one referenced, so editing a target invalidates it. */
   refDeps?: readonly { collection: string; id: string; digest: string }[]
   /**
@@ -476,7 +478,7 @@ export interface StoreEntry {
    * only the paths would re-run the transform and then skip the write, because
    * the source document itself is untouched.
    */
-  watchDeps?: readonly { path: string; digest: string; mtimeMs: number }[]
+  watchDeps?: readonly { path: string; digest: string; mtimeMs: number; size: number }[]
   /**
    * Digest of everything the emitted output depends on.
    *

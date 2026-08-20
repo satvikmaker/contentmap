@@ -389,7 +389,7 @@ export class Builder {
    */
   async #digestWatched(
     paths: readonly string[] | undefined
-  ): Promise<{ path: string; digest: string; mtimeMs: number }[] | undefined> {
+  ): Promise<{ path: string; digest: string; mtimeMs: number; size: number }[] | undefined> {
     if (!paths || paths.length === 0) return undefined
     const unique = [...new Set(paths)].sort()
     const out = await mapLimit(unique, 16, async path => {
@@ -398,11 +398,12 @@ export class Builder {
           withFdRetry(() => readFile(path)),
           stat(path)
         ])
-        return { path, digest: digestOf(buffer), mtimeMs: info.mtimeMs }
+        return { path, digest: digestOf(buffer), mtimeMs: info.mtimeMs, size: info.size }
       } catch {
         // Missing is a state like any other: recording it means the file
         // appearing later counts as a change.
-        return { path, digest: 'missing', mtimeMs: 0 }
+        // Missing has no size; recording 0 is consistent with the mtime.
+        return { path, digest: 'missing', mtimeMs: 0, size: 0 }
       }
     })
     return out
@@ -617,7 +618,7 @@ export class Builder {
       collection.name,
       new Map(
         finalEntries.map(
-          e => [e.meta.filePath, { mtimeMs: e.mtimeMs, digest: e.digest }] as const
+          e => [e.meta.filePath, { mtimeMs: e.mtimeMs, size: e.size, digest: e.digest }] as const
         )
       )
     )
@@ -992,6 +993,9 @@ export class Builder {
       data,
       meta,
       mtimeMs: 0,
+      // Loader-backed: no file on disk, so the mtime/size prefilter never
+      // applies. Freshness comes from the loader's own digest.
+      size: 0,
       ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
       ...(refDeps === undefined ? {} : { refDeps })
     }
@@ -1465,6 +1469,7 @@ export class Builder {
         data,
         meta: pending.meta,
         mtimeMs: file.mtimeMs,
+        size: file.size,
         ...(assetDeps === undefined ? {} : { assets: owned, assetDeps }),
         ...(refDeps === undefined ? {} : { refDeps }),
         ...(watchDeps === undefined ? {} : { watchDeps })

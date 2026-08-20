@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chmod, readFile, stat } from 'node:fs/promises'
+import { chmod, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createBuilder } from '../src/builder.ts'
@@ -158,6 +158,61 @@ describe('correctness guarantees', () => {
     expect(result.diagnostics.some(d => d.code === 'CM_READ')).toBe(true)
     }
   )
+
+  // mtime is pinned to a whole number of milliseconds on BOTH sides. Reading it
+  // back as a Date and restoring that truncates sub-millisecond precision, so
+  // the "restored" mtime silently differs from the recorded one and the file
+  // gets re-read for the wrong reason — which is how the first draft of these
+  // tests passed without exercising anything.
+  const PINNED = new Date(1_767_225_600_000)
+
+  fixtureTest('sees a rewrite that lands in the same millisecond', async ({ fixture }) => {
+    // mtime has millisecond resolution and two saves inside one millisecond are
+    // ordinary while editing. Without a watcher to appeal to there is nothing
+    // else to consult, so mtime alone would call this unchanged and emit stale
+    // output — the silent-wrong-answer failure this project exists to avoid.
+    // Size comes free from the same stat and catches it.
+    await fixture.write('contentmap.config.ts', config(POSTS))
+    const doc = await fixture.write(
+      'content/a.md',
+      '---\ntitle: Before\ndate: 2026-01-01\n---\nx'
+    )
+    await utimes(doc, PINNED, PINNED)
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+
+    await writeFile(doc, '---\ntitle: After the edit\ndate: 2026-01-01\n---\nx')
+    await utimes(doc, PINNED, PINNED)
+    expect((await stat(doc)).mtimeMs).toBe(PINNED.getTime())
+
+    await builder.build()
+
+    const emitted = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(emitted).toContain('After the edit')
+  })
+
+  fixtureTest('cannot see a same-millisecond rewrite of identical length', async ({ fixture }) => {
+    // The honest limit of a stat-only prefilter: identical mtime AND identical
+    // byte count is indistinguishable from no edit without reading the file,
+    // which is the cost the prefilter exists to avoid. Asserted so the boundary
+    // is a stated property rather than a surprise — a watcher closes it, since
+    // a file it names is read regardless of what its mtime claims.
+    await fixture.write('contentmap.config.ts', config(POSTS))
+    const doc = await fixture.write('content/a.md', '---\ntitle: Aaa\ndate: 2026-01-01\n---\nx')
+    await utimes(doc, PINNED, PINNED)
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+
+    await writeFile(doc, '---\ntitle: Bbb\ndate: 2026-01-01\n---\nx')
+    await utimes(doc, PINNED, PINNED)
+
+    await builder.build()
+
+    const emitted = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(emitted).toContain('Aaa')
+  })
 
   fixtureTest('replays events to a late subscriber', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))

@@ -99,7 +99,20 @@ try {
   // 2125ms and rescan 396ms on the very same commit, so the 150ms rescan gate
   // failed on hardware, not on a regression. Overridable so CI can state its
   // own ceilings instead of pretending one number fits both.
-  const budget = (name, fallback) => Number(process.env[name] ?? fallback)
+  const budget = (name, fallback) => {
+    const raw = process.env[name]
+    if (raw === undefined || raw === '') return fallback
+    const n = Number(raw)
+    // `Number('')` is 0 and `Number('abc')` is NaN. Either would turn the gate
+    // into one that can never pass, reported as a failure of the code rather
+    // than of the configuration — the same trap `--concurrency abc` used to set
+    // in the CLI.
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(`${name} must be a positive number, received "${raw}"`)
+      process.exit(2)
+    }
+    return n
+  }
   const COLD = budget('BENCH_COLD_MS', 5000)
   const RESCAN = budget('BENCH_RESCAN_MS', 150)
   const RSS = budget('BENCH_RSS_MB', 400)
