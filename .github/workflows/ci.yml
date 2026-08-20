@@ -64,6 +64,9 @@ jobs:
       # Our type tests import `../src`; a user imports the emitted `.d.ts`. Two
       # type bugs shipped through that gap and failed real `next build`s.
       - run: pnpm verify:types
+      # A migrated config has to build, not merely look like a config. This
+      # caught a rewrite that referenced a parameter the function never declared.
+      - run: pnpm verify:migrate
 
   examples:
     name: real framework builds

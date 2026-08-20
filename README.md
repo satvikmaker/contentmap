@@ -130,6 +130,14 @@ Every adapter is a convenience. `contentmap build` produces identical output, an
 
 `pnpm verify:examples` builds all four applications with their real toolchains. That gate is not decoration: writing those four examples turned up four bugs that every hook-level test had passed straight over, including a Nuxt module that never ran and an Astro build that could not start.
 
+## Coming from something else
+
+```sh
+npx @contentmap/migrate
+```
+
+Translates a contentlayer2, velite or content-collections config, and writes a report of anything that needs a human. Your original config is not modified. See [@contentmap/migrate](packages/migrate) for what it does and does not convert.
+
 ## CLI
 
 ```

@@ -1,0 +1,38 @@
+{
+  "name": "@contentmap/migrate",
+  "version": "0.1.0",
+  "description": "Migrate a contentlayer2, velite or content-collections config to contentmap.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satvikmaker/contentmap.git",
+    "directory": "packages/migrate"
+  },
+  "bugs": "https://github.com/satvikmaker/contentmap/issues",
+  "homepage": "https://github.com/satvikmaker/contentmap#readme",
+  "engines": {
+    "node": "^22.11.0 || >=24"
+  },
+  "bin": {
+    "contentmap-migrate": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3"
+  }
+}
