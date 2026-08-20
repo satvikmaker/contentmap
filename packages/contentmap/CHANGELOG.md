@@ -13,6 +13,7 @@
   - **Typed projections** — `select` narrows the row type; `sortBy`, `where` and `groupBy` still reach the whole index, so you can render two fields and order by a third
   - **Assets and images** — dimensions at build time so pages stop jumping, plus thumbhash placeholders that need no client JavaScript
   - **Cross-collection references**, a persistent transform cache, remote sources with digest-keyed revalidation, and watch mode
+  - **A migration codemod** — `npx @contentmap/migrate` converts a contentlayer2, velite or content-collections config and reports what needs a human
   - **Five framework adapters** — Vite (covering SvelteKit, SolidStart, Qwik, React Router, TanStack Start and Analog), Next on both Turbopack and webpack, Nuxt, Astro, and webpack/Rspack. Each is proven against its real toolchain by an example application in CI
 
   Nine packages, ten runtime dependencies, 7.0 MB installed. Every adapter is a convenience: `contentmap build` produces identical output, and CI diffs the two to keep that true.
