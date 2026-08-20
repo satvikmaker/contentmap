@@ -233,33 +233,65 @@ describe('nuxt module', () => {
 })
 
 describe('webpack plugin', () => {
+  /** Drives the plugin the way webpack does: tap, then run the tapped hook. */
+  const runBeforeCompile = async (
+    plugin: ContentmapWebpackPlugin,
+    compiler: { options: { mode: string; resolve: { alias?: Record<string, string> } } }
+  ): Promise<void> => {
+    const taps: (() => Promise<void>)[] = []
+    plugin.apply({
+      ...compiler,
+      hooks: { beforeCompile: { tapPromise: (_n: string, fn: () => Promise<void>) => taps.push(fn) } }
+    } as never)
+    for (const tap of taps) await tap()
+  }
+
   fixtureTest('registers the generated alias, as the other adapters do', async ({ fixture }) => {
     // webpack does not read tsconfig paths, so without this every project
     // repeats the same resolve.alias by hand — and `contentmap/generated`
     // looks enough like a real package subpath that the failure is "Module not
     // found", which points at nothing.
-    const compiler = {
-      options: { mode: 'production' as const, resolve: {} as { alias?: Record<string, string> } },
-      hooks: { beforeCompile: { tapPromise: () => {} } }
-    }
+    await seed(fixture)
+    const compiler = { options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } } }
 
-    new ContentmapWebpackPlugin({ root: fixture.dir }).apply(compiler as never)
+    await runBeforeCompile(new ContentmapWebpackPlugin({ root: fixture.dir }), compiler)
 
     expect(compiler.options.resolve.alias?.['contentmap/generated']).toBe(
       join(fixture.dir, '.contentmap')
     )
   })
 
+  fixtureTest('points the alias at output.dir when the config moves it', async ({ fixture }) => {
+    // Recomputing the default instead of asking the resolver produced an alias
+    // to a directory that was never written, and webpack reported it as
+    // "Module not found" against a specifier that names nothing.
+    await fixture.write(
+      'contentmap.config.ts',
+      CONFIG.replace(
+        'export default defineConfig({ collections: { posts } })',
+        "export default defineConfig({ collections: { posts }, output: { dir: 'generated' } })"
+      )
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nbody')
+    const compiler = { options: { mode: 'production', resolve: {} as { alias?: Record<string, string> } } }
+
+    await runBeforeCompile(new ContentmapWebpackPlugin({ root: fixture.dir }), compiler)
+
+    expect(compiler.options.resolve.alias?.['contentmap/generated']).toBe(
+      join(fixture.dir, 'generated')
+    )
+  })
+
   fixtureTest('never overwrites an alias the project set itself', async ({ fixture }) => {
+    await seed(fixture)
     const compiler = {
       options: {
-        mode: 'production' as const,
+        mode: 'production',
         resolve: { alias: { 'contentmap/generated': '/somewhere/else' } }
-      },
-      hooks: { beforeCompile: { tapPromise: () => {} } }
+      }
     }
 
-    new ContentmapWebpackPlugin({ root: fixture.dir }).apply(compiler as never)
+    await runBeforeCompile(new ContentmapWebpackPlugin({ root: fixture.dir }), compiler)
 
     expect(compiler.options.resolve.alias['contentmap/generated']).toBe('/somewhere/else')
   })

@@ -2,8 +2,8 @@
   "name": "@contentmap-example/next",
   "private": true,
   "scripts": {
-    "build": "next build",
-    "build:webpack": "next build --no-turbopack"
+    "build": "next build && next build --webpack",
+    "build:webpack": "next build --webpack"
   },
   "dependencies": {
     "@contentmap/next": "workspace:*",

@@ -1,4 +1,3 @@
-import { resolve } from 'node:path'
 import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
 
 interface CompilerLike {
@@ -24,15 +23,24 @@ export interface WebpackPluginOptions extends BuilderOptions {
  * produces identical output, and relying on a bundler plugin is what left
  * contentlayer unable to run at all once Turbopack arrived.
  */
+interface Session {
+  started: Promise<void>
+  builder: Builder
+  /** Where the resolved config puts generated output. */
+  generated?: string
+}
+
 export class ContentmapWebpackPlugin {
   /**
-   * Shared across instances on purpose.
+   * Shared across instances, keyed by project.
    *
    * A webpack build constructs one compiler per target — node, edge and client
-   * — so a per-instance guard still builds three times for one command.
+   * — so a per-instance guard still builds three times for one command. Keyed
+   * rather than global because one process can build more than one project: a
+   * monorepo build script would otherwise have the second project silently
+   * reuse the first one's builder, and its generated alias.
    */
-  static #started: Promise<void> | undefined
-  static #builder: Builder | undefined
+  static #sessions = new Map<string, Session>()
 
   readonly #options: WebpackPluginOptions
 
@@ -43,48 +51,62 @@ export class ContentmapWebpackPlugin {
   apply(compiler: CompilerLike): void {
     const { watch = true, ...builderOptions } = this.#options
 
-    // Register the alias, as the Vite plugin and the Nuxt module do. webpack
-    // does not read tsconfig paths, so without this every project has to
-    // repeat the same resolve.alias entry by hand — and `contentmap/generated`
-    // looks enough like a real package subpath that the failure is "Module not
-    // found", which points at nothing. Set before the build so the very first
-    // compilation can resolve it.
-    if (compiler.options) {
-      const resolve = (compiler.options.resolve ??= {})
-      const alias = (resolve.alias ??= {})
-      alias['contentmap/generated'] ??= resolveGeneratedDir(builderOptions)
-    }
+    const key = sessionKey(builderOptions)
 
     compiler.hooks.beforeCompile.tapPromise('contentmap', async () => {
-      ContentmapWebpackPlugin.#started ??= (async () => {
+      let session = ContentmapWebpackPlugin.#sessions.get(key)
+      if (!session) {
         const builder = createBuilder(builderOptions)
-        ContentmapWebpackPlugin.#builder = builder
-        // Awaited, unlike contentlayer's fire-and-forget dev path, which is why
-        // its first dev render could show stale or missing data.
-        await builder.build()
-        if (watch && compiler.options?.mode === 'development') await builder.watch()
-      })()
-      await ContentmapWebpackPlugin.#started
+        const created: Session = {
+          builder,
+          started: Promise.resolve()
+        }
+        created.started = (async () => {
+          // Ask the resolver where output actually goes rather than recomputing
+          // the default. `output.dir` in the config, and a `root` relative to
+          // the config rather than to cwd, both move it — and an alias pointing
+          // at a directory that was never written fails as "Module not found",
+          // naming nothing.
+          created.generated = (await builder.resolve()).output.dir
+          // Awaited, unlike contentlayer's fire-and-forget dev path, which is
+          // why its first dev render could show stale or missing data.
+          await builder.build()
+          if (watch && compiler.options?.mode === 'development') await builder.watch()
+        })()
+        session = created
+        ContentmapWebpackPlugin.#sessions.set(key, created)
+      }
+      await session.started
+
+      // Register the alias, as the Vite plugin and the Nuxt module do. webpack
+      // does not read tsconfig paths, so without this every project repeats the
+      // same resolve.alias by hand. Set here rather than in `apply` because the
+      // location is only known once the config has been read, and beforeCompile
+      // still precedes any module resolution.
+      if (compiler.options && session.generated !== undefined) {
+        const resolve = (compiler.options.resolve ??= {})
+        const alias = (resolve.alias ??= {})
+        alias['contentmap/generated'] ??= session.generated
+      }
     })
 
     compiler.hooks.shutdown?.tapPromise('contentmap', async () => {
-      await ContentmapWebpackPlugin.#builder?.close()
-      ContentmapWebpackPlugin.#builder = undefined
-      ContentmapWebpackPlugin.#started = undefined
+      const session = ContentmapWebpackPlugin.#sessions.get(key)
+      ContentmapWebpackPlugin.#sessions.delete(key)
+      await session?.builder.close()
     })
   }
 }
 
 /**
- * Where the generated output will land, without resolving the config.
+ * Identity of the project a compiler is building.
  *
- * `apply()` is synchronous, and reading the config is not, so this mirrors the
- * same defaulting the resolver uses. An explicit `outDir` wins; otherwise it is
- * `.contentmap` under the project root, which is the default the CLI, the
- * scaffolder and the tsconfig path all already assume.
+ * Only the fields that can point at different content; anything else is either
+ * irrelevant to which builder to share, or already reflected in the config the
+ * builder resolves.
  */
-function resolveGeneratedDir(options: BuilderOptions): string {
-  return resolve(options.root ?? process.cwd(), options.outDir ?? '.contentmap')
+function sessionKey(options: BuilderOptions): string {
+  return JSON.stringify([options.root ?? process.cwd(), options.config ?? '', options.outDir ?? ''])
 }
 
 export default ContentmapWebpackPlugin

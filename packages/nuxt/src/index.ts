@@ -15,18 +15,9 @@ export interface NuxtLike {
       typescript?: { tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]> } } }
     }
     typescript?: { tsConfig?: { compilerOptions?: { paths?: Record<string, string[]> } } }
-    /** Whatever the user wrote under the module's config key. */
-    [key: string]: unknown
   }
   hook(name: string, cb: (...args: never[]) => unknown): void
   callHook?(name: string, ...args: unknown[]): Promise<void>
-}
-
-/** Vite accepts either shape for `resolve.alias`; Nuxt may have set either. */
-interface ViteConfigLike {
-  resolve?: {
-    alias?: Record<string, string> | { find: string | RegExp; replacement: string }[]
-  }
 }
 
 export interface NuxtModuleOptions extends BuilderOptions {
@@ -74,7 +65,10 @@ export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNux
       // a package whose whole argument is not needing one. Precedence runs
       // config key, then inline options, then the factory argument — each more
       // specific than the last.
-      const fromConfigKey = (nuxt.options[meta.configKey] ?? {}) as NuxtModuleOptions
+      // Cast at the one site that needs it. An index signature on NuxtLike
+      // would silence typos in every other `nuxt.options.x` we touch.
+      const fromConfigKey = ((nuxt.options as Record<string, unknown>)[meta.configKey] ??
+        {}) as NuxtModuleOptions
       const { watch = true, ...builderOptions } = { ...fromConfigKey, ...moduleOptions, ...options }
       const builder: Builder = createBuilder({ root: nuxt.options.rootDir, ...builderOptions })
       const config = await builder.resolve()
@@ -82,21 +76,6 @@ export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNux
 
       nuxt.options.alias['contentmap/generated'] = generated
 
-      // Nuxt's own alias map is not enough. `contentmap/generated` looks like a
-      // subpath of a package that really exists, and Vite's resolver consults
-      // the package's `exports` before it consults the alias — so the client
-      // build failed with "./generated is not exported". The generated
-      // directory lives in the user's project, so no exports entry could ever
-      // point at it. Registering on the Vite config directly is what makes the
-      // resolver see it first.
-      nuxt.hook('vite:extendConfig', ((config: ViteConfigLike) => {
-        const resolve = (config.resolve ??= {})
-        if (Array.isArray(resolve.alias)) {
-          resolve.alias.push({ find: 'contentmap/generated', replacement: generated })
-        } else {
-          resolve.alias = { ...resolve.alias, 'contentmap/generated': generated }
-        }
-      }) as never)
 
       // Nitro type-checks separately from the app, so registering the path in
       // the Nuxt tsconfig alone leaves server routes unable to resolve it.
