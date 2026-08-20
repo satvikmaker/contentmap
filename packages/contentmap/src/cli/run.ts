@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util'
 import { createBuilder } from '../builder.ts'
 import { ConfigError } from '../config/resolve.ts'
 import { codeFrame, DiagnosticBag, renderDiagnostics } from '../diagnostics/index.ts'
+import { init } from './init.ts'
 import { cleanOutput, exists } from '../write/emit.ts'
 import { resolveConfig } from '../config/resolve.ts'
 import { bold, cyan, dim, green, red, yellow } from '../utils/ansi.ts'
@@ -19,7 +20,7 @@ ${bold('Commands')}
   dev                Build and watch.
   check              Validate only; emit nothing. For CI.
   clean              Remove generated output.
-  init               Scaffold a config file.
+  init               Scaffold a config, sample content and tsconfig path.
 
 ${bold('Options')}
   -c, --config <path>            Config file path
@@ -51,6 +52,7 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
         'on-validation-error': { type: 'string' },
         frozen: { type: 'boolean' },
         debounce: { type: 'string' },
+        force: { type: 'boolean' },
         json: { type: 'boolean' },
         silent: { type: 'boolean', short: 's' },
         verbose: { type: 'boolean', short: 'v' },
@@ -97,8 +99,7 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
       case 'dev':
         return await dev(options, values)
       case 'init':
-        process.stderr.write(`${yellow('!')} \`init\` arrives in M9.\n`)
-        return 1
+        return await scaffold(options, values)
       default:
         process.stderr.write(`${red('✖')} Unknown command "${command}"\n\n${HELP}\n`)
         return 1
@@ -309,6 +310,22 @@ async function dev(options: BuilderOptions, values: Values): Promise<number> {
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
   })
+  return 0
+}
+
+async function scaffold(options: BuilderOptions, values: Values): Promise<number> {
+  const root = options.root ?? process.cwd()
+  const result = await init({ root, force: values['force'] === true })
+
+  process.stdout.write(`${green('✔')} ${bold('contentmap')} ${dim(`(${result.detected})`)}\n`)
+  for (const file of result.created) process.stdout.write(`  ${green('+')} ${file}\n`)
+  for (const file of result.updated) process.stdout.write(`  ${cyan('~')} ${file}\n`)
+  for (const file of result.skipped) {
+    process.stdout.write(`  ${dim('=')} ${dim(`${file} (exists, left alone — pass --force to replace)`)}\n`)
+  }
+  process.stdout.write('\n')
+  for (const note of result.notes) process.stdout.write(`  ${dim(note)}\n`)
+  process.stdout.write(`\n  Next: ${cyan('npx contentmap build')}\n`)
   return 0
 }
 

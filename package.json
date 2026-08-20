@@ -27,7 +27,9 @@
     "bench": "node scripts/bench.mjs 10000",
     "bench:bundle": "node scripts/bundle-size.mjs",
     "gate:fd": "./scripts/fd-limit-gate.sh",
-    "verify:vite": "node --experimental-strip-types scripts/verify-vite.mjs"
+    "verify:vite": "node --experimental-strip-types scripts/verify-vite.mjs",
+    "bench:compare": "node scripts/bench-compare.mjs 1000",
+    "verify:footprint": "node scripts/footprint.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

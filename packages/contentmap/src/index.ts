@@ -6,6 +6,8 @@ export { Builder, createBuilder } from './builder.ts'
 export { startWatch } from './watch/index.ts'
 export type { WatchHandle, WatchHooks, WatchOptions } from './watch/index.ts'
 export { run } from './cli/run.ts'
+export { init } from './cli/init.ts'
+export type { InitOptions, InitResult } from './cli/init.ts'
 export {
   codeFrame,
   DiagnosticBag,

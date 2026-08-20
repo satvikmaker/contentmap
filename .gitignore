@@ -34,3 +34,5 @@ pnpm-debug.log*
 docs/
 .wb-*/
 .vite-e2e-*/
+.compare/
+bench-results.json

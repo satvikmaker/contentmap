@@ -8,14 +8,26 @@ Files in. Typed data out. Next.js, Nuxt, Astro, SvelteKit, SolidStart, Qwik, Rea
 
 </div>
 
-> **Status: design phase.** No code yet. The specification is complete and grounded in a full source-level audit of the tools this replaces. See [PRD](docs/PRD.md) · [Spec](docs/SPEC.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md).
+> **Status: pre-1.0, not yet published.** The build pipeline, renderers, assets, references, remote sources, watch mode and five framework adapters are implemented and tested. See [Status](#status) for what is still missing.
 
----
+```bash
+npx contentmap init
+```
+
+## Quickstart
 
 ```ts
 // contentmap.config.ts
 import { defineConfig, defineCollection } from 'contentmap'
+import { markdown } from '@contentmap/markdown'
 import { z } from 'zod'
+
+const authors = defineCollection({
+  name: 'authors',
+  directory: 'content/authors',
+  include: '**/*.yaml',
+  schema: z.object({ id: z.string(), name: z.string() })
+})
 
 const posts = defineCollection({
   name: 'posts',
@@ -25,91 +37,142 @@ const posts = defineCollection({
     title: z.string().max(120),
     date: z.coerce.date(),
     cover: z.string(),
-    author: z.string()
+    author: z.string(),
+    draft: z.boolean().default(false)
   }),
-  transform: async (doc, ctx) => ({
-    ...doc,
-    slug: ctx.meta.path,
-    cover: await ctx.image(doc.cover),        // → { src, width, height, blurDataURL }
-    author: await ctx.resolve(authors, doc.author),  // joined, checked at build time
-    html: await ctx.markdown(),
-    reading: ctx.readingTime()
-  })
+  transform: async (doc, ctx) => {
+    if (doc.draft) ctx.skip('draft')
+    return {
+      ...doc,
+      slug: ctx.meta.slug,
+      cover: await ctx.image(doc.cover),        // dimensions + a placeholder
+      author: await ctx.resolve(authors, doc.author),  // joined, checked at build time
+      html: await ctx.markdown(),
+      reading: await ctx.readingTime()
+    }
+  }
 })
 
-export default defineConfig({ collections: { authors, posts } })
+export default defineConfig({
+  collections: { authors, posts },
+  renderer: markdown()
+})
 ```
 
 ```ts
 import { posts } from 'contentmap/generated'
 
-// typed projections — the result type narrows with the query
 const cards = posts
   .where({ draft: false })
-  .select('title', 'slug', 'cover')   // → Pick<Post, 'title'|'slug'|'cover'>[]
+  .select('title', 'slug', 'cover')   // → Pick<Post, 'title' | 'slug' | 'cover'>[]
   .sortBy('date', 'desc')
   .limit(10)
   .all()
 
-cards[0].cover.blurDataURL   // ✅ generated at build time, zero client JS
+cards[0].cover.placeholder   // ✅ generated at build time, zero client JS
 cards[0].author              // ✗ compile error — not selected
 
-const full = await posts.load('hello-world')   // bundles ONE document, not the corpus
+const full = await posts.load('hello-world')   // bundles ONE document
 ```
-
-Content doesn't have to be local:
-
-```ts
-const changelog = defineCollection({
-  name: 'changelog',
-  loader: http({
-    url: 'https://api.example.com/releases',
-    headers: () => ({ Authorization: `Bearer ${process.env.API_TOKEN}` }),
-    select: r => r.items,
-    id: r => r.slug
-  }),
-  schema: z.object({ slug: z.string(), version: z.string(), body: z.string() })
-})
-```
-
-Same schema pipeline, same types, same cache. `contentmap build --frozen` refuses the network for reproducible release builds, and credentials never reach disk.
 
 ## Why
 
-Three tools own this space, and each hit a wall. We read all of their source and reproduced the failures:
+Three tools own this space. Each solved part of the problem and hit a wall:
 
-- **Contentlayer** is dead — last release June 2023. Under Next 16's default Turbopack it doesn't just fail to hot-reload; **it never executes at all**. Its `embedDocument` on lists generates `Author[]` in the `.d.ts` while the JSON holds `string[]`. 185 MB install, 64% of it an unused tracing stack.
-- **Velite** has the best asset pipeline in the space — and **74% of its source is a vendored fork of Zod 3**. It emits schema-violating data and exits 0 by default; a real violation logs at `info` while its own advisory note logs at `warning`.
-- **Content Collections** has the best DX and the cleanest dependency posture — and under a modest file-descriptor limit it **silently lost 2,758 of 3,000 documents and exited 0**, because errors are emitted before a consumer can subscribe. It has no image support at all.
+- **Contentlayer** — last release June 2023. Under Next 16's default Turbopack it does not merely fail to hot-reload; it never executes at all. Its `embedDocument` on lists declares `Author[]` while the JSON holds `string[]`. 287 packages, 134 MB.
+- **Velite** — the best asset pipeline in the space, and 74% of its source is a vendored fork of Zod 3. It emits schema-violating data and exits 0 by default.
+- **Content Collections** — the best DX and the cleanest dependency posture, and under a modest file-descriptor limit it silently lost 2,758 of 3,000 documents and exited 0. No image support at all.
 
-And all three emit one array literal per collection. That single decision is why Contentlayer produced a **489 MB** generated file at 15k documents, why an ordinary 680-post blog produces a **27 MiB** Content Collections module, and why a one-character edit costs a 2-second rebuild.
+All three emit **one array literal per collection**. That single decision is why an ordinary 680-post blog produces a 27 MiB module ([content-collections#784](https://github.com/sdorra/content-collections/issues/784)), why Contentlayer produced a 489 MB file at 15k documents, and why a one-character edit costs seconds to rebuild.
 
-## What's different
-
-| | |
-|---|---|
-| **Correct by default** | A green build cannot have silently dropped data. Enforced by a CI test that builds under `ulimit -n 64` and asserts non-zero exit |
-| **Typed projections** | `select('title','date')` narrows to `Pick<Post,…>`. The only file-based tool where the query is part of the type surface |
-| **Local and remote** | Markdown, MDX, YAML, JSON, TOML, XML, CSV — plus HTTP, git and headless CMSs through one `Loader` contract |
-| **Per-document modules** | Read one post, bundle one post. Free code-splitting, fine-grained HMR, and Turbopack compatibility |
-| **CLI-first** | `contentmap build` is the product. Every bundler plugin is a convenience wrapper — CI proves output is identical without it |
-| **Validator-agnostic** | Zod, Valibot, ArkType, Effect Schema. Zero validators in our dependency tree |
-| **JSON Schema IR** | Built on `StandardJSONSchemaV1`, which nobody else uses yet. One artifact → types, editor `$schema` autocomplete, CMS fields |
-| **Honestly lightweight** | Target: **7 packages / 2.34 MB**. Velite is 129 / 41.9 MB; `@content-collections/core` is 27 / 43.7 MB. We publish the real `npm i` number |
-| **Errors that help** | Contentlayer's corpus-level aggregation — the one thing the ecosystem regressed on — on Standard Schema issues |
-
-## Research
-
-Six engineering reports, all from reading source and running measurements — not documentation:
+## What is different
 
 | | |
 |---|---|
-| [velite.md](docs/research/velite.md) | Four reproduced bugs; the Zod fork; the `.d.ts` trick worth stealing |
-| [content-collections.md](docs/research/content-collections.md) | The 92% silent data loss; the type trampoline; the 17.8 MB ceiling |
-| [contentlayer2.md](docs/research/contentlayer2.md) | Turbopack reproduced; the Chunk leak; why Effect-TS prevented rescue |
-| [landscape.md](docs/research/landscape.md) | Astro 7's Loader API, Nuxt Content v3, Standard Schema 1.1, every framework's hook |
-| [primitives.md](docs/research/primitives.md) | Measured: globbing, watching, YAML, renderers, images, config loading |
-| [ecosystem-health.md](docs/research/ecosystem-health.md) | Downloads, maintenance, and the benchmarks that don't exist |
+| **Correct by default** | A green build cannot have silently dropped data. CI builds 3,000 documents under `ulimit -n 64` and fails if the build exits 0 with a truncated corpus |
+| **Per-document output** | Read one post, bundle one post. Free code-splitting, fine-grained HMR, Turbopack compatibility |
+| **Typed projections** | `select('title','date')` narrows to `Pick<Post, …>`. The only file-based tool where the query is part of the type surface |
+| **Validator-agnostic** | zod, valibot, arktype, effect — all four tested for identical behaviour. No validator in our dependency tree |
+| **CLI-first** | `contentmap build` is the product. CI asserts the Vite plugin's output is byte-identical to the CLI's |
+| **Local and remote** | Markdown, MDX, YAML, JSON, JSONC, TOML — plus HTTP endpoints through the same schema, cache and type pipeline |
+
+## Measured against the alternatives
+
+One corpus of 1,000 markdown documents, every tool configured for frontmatter parsing plus schema validation. Reproduce with `pnpm bench:compare`.
+
+| | packages | install size | files emitted |
+|---|---|---|---|
+| **contentmap** | **10** | **7.0 MB** | 1,004 |
+| velite | 131 | 54.6 MB | 3 |
+| content-collections | 41 | 62.7 MB | 4 |
+| contentlayer2 | 287 | 134.0 MB | 1,009 |
+
+*(Includes zod, which contentmap and content-collections both need. contentmap alone is 9 packages / 2.6 MB.)*
+
+Two honest notes on this table.
+
+**Build times are not shown.** Every measurement available was taken on a machine under heavy external load, where the same commit varied by 8×. Timing claims need an idle machine, and publishing numbers we cannot stand behind is the practice this project exists to avoid — velite's benchmark claims "1000+ documents" while testing 550, and content-collections publishes none at all.
+
+**The file counts are the tradeoff, not an accident.** Emitting 1,004 files costs more to write than emitting 3. It buys the last row of the previous table: a page rendering ten cards from a 5,000-post collection bundles the index, not the corpus. content-collections bundles 16.3 MB for that same read.
+
+## Framework setup
+
+| Framework | Package | Setup |
+|---|---|---|
+| Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start, Analog | `@contentmap/vite` | add `contentmap()` to `plugins` |
+| Next.js (Turbopack and webpack) | `@contentmap/next` | wrap with `withContentmap()` |
+| Nuxt | `@contentmap/nuxt` | add to `modules` |
+| Astro | `@contentmap/astro` | use `contentmapLoader()` as a collection loader |
+| webpack / Rspack | `@contentmap/webpack` | add `new ContentmapWebpackPlugin()` |
+| Angular CLI | — | no plugin array exists; run `contentmap build` from `prebuild` |
+
+Every adapter is a convenience. `contentmap build` produces identical output, and CI proves it — which is what keeps the tool alive when a bundler drops plugin support, as Turbopack did to Contentlayer.
+
+## CLI
+
+```
+contentmap build      Build once. Non-zero exit on error.
+contentmap dev        Build and watch.
+contentmap check      Validate only; emit nothing. For CI.
+contentmap clean      Remove generated output.
+contentmap init       Scaffold config, sample content and tsconfig path.
+```
+
+Notable flags: `--frozen` (refuse the network; fail on a cold remote cache), `--json` (machine-readable diagnostics), `--on-validation-error=<fail|warn|skip|ignore>`.
+
+## Errors
+
+```
+✖ contentmap — 2 errors, 0 warnings in 1,284 documents (1,282 ok)
+
+  Validation (1)
+  └─ content/posts/hello.md:3:1
+     date         Invalid date: "yesterday"
+                    2 | title: Hello
+                  > 3 | date: yesterday
+                      | ^
+
+  Missing reference (1)
+  └─ content/posts/intro.md
+     author       "authors/ghost" not found in collection "authors"
+                  Did you mean "authors/ghosh"?
+```
+
+Grouped by kind, then by file, with a corpus-level summary. Every diagnostic names a file, and field-level ones carry a position and an excerpt.
+
+## Status
+
+Implemented and tested: the build pipeline, diagnostics, pluggable renderers, transforms, assets and image placeholders, cross-collection references, a persistent transform cache, remote sources, watch mode, and five framework adapters. 226 tests.
+
+Not done:
+
+- **Example applications.** Only Vite is proven end to end against a real toolchain. The other adapters are written against documented hook contracts with their behaviour asserted, but no Next, Nuxt, Astro or webpack app is built in CI.
+- **Published build timings.** The harness exists; a quiet machine does not.
+- **Migration codemods** from velite, content-collections and contentlayer.
+- **A documentation site.** This README is the documentation.
+- **`@contentmap/git`** for content in another repository.
+
+Until those land, this is not 1.0.
 
 ## License
 
