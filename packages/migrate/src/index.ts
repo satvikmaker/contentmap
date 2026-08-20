@@ -1,4 +1,4 @@
-import { emitConfig, renderNotes } from './emit.ts'
+import { emitConfig, normalizePlan, renderNotes } from './emit.ts'
 import { detect } from './detect.ts'
 import { migrateContentCollections } from './sources/content-collections.ts'
 import { migrateContentlayer } from './sources/contentlayer.ts'
@@ -30,6 +30,7 @@ const ALWAYS = ['contentmap', 'zod']
 export function migrate(source: string, tool: SourceTool, fileName?: string): MigrationResult {
   const file = parse(source, fileName)
   const plan = TRANSLATORS[tool](file)
+  plan.notes.push(...normalizePlan(plan))
   const install = [...ALWAYS]
   if (plan.notes.some(n => n.hint?.includes('@contentmap/image'))) install.push('@contentmap/image')
   if (plan.notes.some(n => n.hint?.includes('@contentmap/markdown'))) {

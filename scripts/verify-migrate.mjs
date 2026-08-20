@@ -53,10 +53,26 @@ const posts = defineCollection({
 export default defineConfig({ collections: [posts] })
 `
 
+// Everything here once produced a config that did not compile: a name that is
+// not an identifier, two types that pluralise alike, a collection defined
+// inline in the array, and a field colliding with the implicit body.
+const ADVERSARIAL = `
+import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+const A = defineDocumentType(() => ({
+  name: 'Post', filePathPattern: '*.md',
+  fields: { title: { type: 'string', required: true }, content: { type: 'string' } }
+}))
+const B = defineDocumentType(() => ({
+  name: 'Post', filePathPattern: 'other/*.md', contentType: 'data', fields: {}
+}))
+export default makeSource({ contentDirPath: 'content', documentTypes: [A, B] })
+`
+
 const CASES = [
   ['contentlayer2', CONTENTLAYER],
   ['velite', VELITE],
-  ['content-collections', CONTENT_COLLECTIONS]
+  ['content-collections', CONTENT_COLLECTIONS],
+  ['contentlayer2 (adversarial)', ADVERSARIAL]
 ]
 
 const count = s => s.match(/\d+ document/)?.[0] ?? 'output'
@@ -74,7 +90,7 @@ for (const [tool, source] of CASES) {
       '---\ntitle: Hello\ndate: 2026-01-01\ntags: [a, b]\n---\n\nSome body text here.\n'
     )
 
-    const { config, notes } = migrate(source, tool)
+    const { config, notes } = migrate(source, tool.replace(/ .*/, ''))
     await writeFile(join(root, 'contentmap.config.ts'), config)
 
     const build = spawnSync(

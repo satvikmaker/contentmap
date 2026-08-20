@@ -1,4 +1,4 @@
-import { callsTo, nameOf, objectOf, prop, resolveObject, stringOf, text, ts } from '../ts.ts'
+import { callsTo, objectOf, prop, resolveObject, stringOf, text, ts } from '../ts.ts'
 import type { CollectionPlan, EmitPlan } from '../emit.ts'
 import type { Note } from '../types.ts'
 
@@ -195,5 +195,3 @@ function literalOrList(node: ts.Expression | undefined): string | string[] | und
   }
   return undefined
 }
-
-export { nameOf }

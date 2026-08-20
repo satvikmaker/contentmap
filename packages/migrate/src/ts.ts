@@ -103,8 +103,14 @@ export function resolveObject(
 ): ts.ObjectLiteralExpression | undefined {
   const direct = objectOf(node)
   if (direct) return direct
-  if (!node || !ts.isIdentifier(node)) return undefined
+  if (!node) return undefined
 
+  // `collections: [defineCollection({ … })]` — inline, never given a name.
+  // Missing this dropped the collection silently and produced a config with
+  // none in it, which is the worst thing a migration can do.
+  if (ts.isCallExpression(node)) return fromCall(node)
+
+  if (!ts.isIdentifier(node)) return undefined
   for (const statement of file.statements) {
     if (!ts.isVariableStatement(statement)) continue
     for (const decl of statement.declarationList.declarations) {
@@ -112,26 +118,30 @@ export function resolveObject(
       const init = decl.initializer
       const object = objectOf(init)
       if (object) return object
-      // `const posts = defineCollection({ … })` — the argument is the object.
-      if (init && ts.isCallExpression(init) && init.arguments.length > 0) {
-        const arg = objectOf(init.arguments[0])
-        if (arg) return arg
-        // contentlayer wraps its definition in a thunk.
-        const thunk = init.arguments[0]
-        if (thunk && (ts.isArrowFunction(thunk) || ts.isFunctionExpression(thunk))) {
-          const body = thunk.body
-          if (ts.isBlock(body)) {
-            for (const s of body.statements) {
-              if (ts.isReturnStatement(s)) {
-                const returned = objectOf(s.expression)
-                if (returned) return returned
-              }
-            }
-          } else {
-            const returned = objectOf(body)
-            if (returned) return returned
-          }
-        }
+      if (init && ts.isCallExpression(init)) return fromCall(init)
+    }
+  }
+  return undefined
+}
+
+/**
+ * The object a definition call was given.
+ *
+ * contentlayer wraps its definition in a thunk so that `reference` fields can
+ * name a type declared later, so the argument is unwrapped either way.
+ */
+function fromCall(call: ts.CallExpression): ts.ObjectLiteralExpression | undefined {
+  const first = call.arguments[0]
+  if (!first) return undefined
+  const object = objectOf(first)
+  if (object) return object
+  if (ts.isArrowFunction(first) || ts.isFunctionExpression(first)) {
+    const body = first.body
+    if (!ts.isBlock(body)) return objectOf(body)
+    for (const statement of body.statements) {
+      if (ts.isReturnStatement(statement)) {
+        const returned = objectOf(statement.expression)
+        if (returned) return returned
       }
     }
   }

@@ -40,6 +40,125 @@ const list = (value: string | string[]): string =>
   Array.isArray(value) ? `[${value.map(quote).join(', ')}]` : quote(value)
 
 /**
+ * Names contentmap refuses, because collection names become export names.
+ *
+ * Kept in step with the resolver's own list — a codemod that emits a config the
+ * tool then rejects is worse than one that renames and says so.
+ */
+const RESERVED = new Set([
+  'default',
+  'import',
+  'export',
+  'const',
+  'let',
+  'var',
+  'function',
+  'class',
+  'return',
+  'new',
+  'typeof',
+  'void',
+  'null',
+  'true',
+  'false',
+  'await',
+  'collection'
+])
+
+function toIdentifier(raw: string): string {
+  const cleaned = raw.replace(/[^A-Za-z0-9_$]/g, '_').replace(/^([0-9])/, '_$1')
+  const safe = cleaned.length > 0 ? cleaned : 'collection'
+  return RESERVED.has(safe) ? `${safe}_` : safe
+}
+
+/**
+ * Make a plan emittable.
+ *
+ * Every problem fixed here produced a file that does not compile: a name with a
+ * hyphen becomes `const my-posts`, two document types that pluralise alike
+ * declare the same `const` twice, and an implicitly injected body field
+ * collides with one the author already declared. All three are rare enough to
+ * miss by hand and certain to waste someone's afternoon.
+ */
+export function normalizePlan(plan: EmitPlan): Note[] {
+  const notes: Note[] = []
+  const taken = new Set<string>()
+  const typeNames = new Set<string>()
+
+  for (const collection of plan.collections) {
+    const wanted = toIdentifier(collection.key)
+    if (wanted !== collection.key) {
+      notes.push({
+        kind: 'review',
+        collection: collection.key,
+        subject: 'name',
+        message: `renamed to \`${wanted}\``,
+        hint: 'Collection names become export names, so they have to be identifiers.'
+      })
+    }
+
+    let unique = wanted
+    for (let n = 2; taken.has(unique); n++) unique = `${wanted}${n}`
+    if (unique !== wanted) {
+      notes.push({
+        kind: 'review',
+        collection: wanted,
+        subject: 'name',
+        message: `renamed to \`${unique}\` — another collection already claimed \`${wanted}\``,
+        hint: 'Two definitions produced the same name. Pick something meaningful for each.'
+      })
+    }
+    taken.add(unique)
+    collection.key = unique
+    // `name` defaults to the key and is validated the same way, so it moves too.
+    collection.name = unique
+
+    // Type names have to be unique as well — contentmap refuses two collections
+    // that would generate the same exported type, which is exactly what two
+    // document types called `Post` produce.
+    if (collection.typeName !== undefined) {
+      const wantedType = collection.typeName
+      let type = wantedType
+      for (let n = 2; typeNames.has(type); n++) type = `${wantedType}${n}`
+      if (type !== wantedType) {
+        notes.push({
+          kind: 'review',
+          collection: unique,
+          subject: 'typeName',
+          message: `renamed to \`${type}\` — \`${wantedType}\` was already taken`,
+          hint: 'Two definitions shared a type name. Give each a name that says what it is.'
+        })
+      }
+      typeNames.add(type)
+      collection.typeName = type
+    }
+
+    // Later wins: an implicit body field is added before the author's own, so
+    // keeping the last one keeps what they actually wrote.
+    const seen = new Map<string, number>()
+    const fields: typeof collection.fields = []
+    for (const field of collection.fields) {
+      const at = seen.get(field.name)
+      if (at === undefined) {
+        seen.set(field.name, fields.length)
+        fields.push(field)
+        continue
+      }
+      fields[at] = field
+      notes.push({
+        kind: 'review',
+        collection: unique,
+        subject: field.name,
+        message: 'was declared twice; the one from your config was kept',
+        hint: 'contentmap injects the body as `content` unless the schema names it itself.'
+      })
+    }
+    collection.fields = fields
+  }
+  return notes
+}
+
+/**
  * Render a contentmap config.
  *
  * Text rather than a printer over a synthetic AST: this file is the first thing

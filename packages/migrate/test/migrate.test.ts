@@ -242,3 +242,74 @@ describe('every migration', () => {
     }
   })
 })
+
+describe('output that has to compile', () => {
+  it('does not drop a collection defined inline in the array', () => {
+    // `collections: [defineCollection({ … })]` is ordinary. Failing to follow it
+    // produced a config with no collections at all and no error — the worst
+    // thing a migration can do, because it looks like it worked.
+    const result = migrate(
+      `import { defineCollection, defineConfig } from '@content-collections/core'
+       export default defineConfig({ collections: [
+         defineCollection({ name: 'notes', directory: 'n', include: '*.md', schema: z.object({}) })
+       ] })`,
+      'content-collections'
+    )
+    expect(result.collections).toEqual(['notes'])
+  })
+
+  it('makes a name that is not an identifier into one', () => {
+    // contentmap rejects these outright: collection names become export names.
+    const result = migrate(
+      `import { defineCollection } from '@content-collections/core'
+       export const x = defineCollection({ name: 'my-posts', directory: 'c', include: '*.md', schema: z.object({}) })`,
+      'content-collections'
+    )
+    expect(result.config).toContain('const my_posts = defineCollection({')
+    expect(result.config).toContain("name: 'my_posts'")
+    expect(result.notes.some(n => n.message.includes('renamed'))).toBe(true)
+  })
+
+  it('renames rather than declaring the same const twice', () => {
+    // Two document types can pluralise alike. `const posts` twice does not
+    // compile, and the collections object would have had a duplicate key.
+    const result = migrate(
+      `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+       const A = defineDocumentType(() => ({ name: 'Post', filePathPattern: 'a/*.md', contentType: 'data', fields: {} }))
+       const B = defineDocumentType(() => ({ name: 'Post', filePathPattern: 'b/*.md', contentType: 'data', fields: {} }))
+       export default makeSource({ contentDirPath: 'c', documentTypes: [A, B] })`,
+      'contentlayer2'
+    )
+    expect(result.collections).toEqual(['posts', 'posts2'])
+    expect(result.config).toContain('collections: { posts, posts2 }')
+    // The type name has to be unique too: contentmap refuses two collections
+    // that would generate the same exported type.
+    expect(result.config).toContain("typeName: 'Post'")
+    expect(result.config).toContain("typeName: 'Post2'")
+  })
+
+  it('keeps the author’s field when it collides with an injected one', () => {
+    // contentlayer supplies the body implicitly, so a document that also
+    // declares `content` produced a duplicate key in the object literal.
+    const result = migrate(
+      `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+       const A = defineDocumentType(() => ({ name: 'Post', filePathPattern: '*.md',
+         fields: { content: { type: 'number' } } }))
+       export default makeSource({ contentDirPath: 'c', documentTypes: [A] })`,
+      'contentlayer2'
+    )
+    // One declaration, and it is the one from their config.
+    expect(result.config.match(/content:/g)).toHaveLength(1)
+    expect(result.config).toContain('content: z.number().optional()')
+    expect(result.notes.some(n => n.message.includes('declared twice'))).toBe(true)
+  })
+
+  it('never emits a reserved word as a collection name', () => {
+    const result = migrate(
+      `import { defineCollection } from '@content-collections/core'
+       export const x = defineCollection({ name: 'export', directory: 'c', include: '*.md', schema: z.object({}) })`,
+      'content-collections'
+    )
+    expect(result.collections).toEqual(['export_'])
+  })
+})

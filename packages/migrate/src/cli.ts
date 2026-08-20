@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
-import { writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { detect } from './detect.ts'
 import { emitConfig, renderNotes } from './emit.ts'
@@ -110,7 +110,6 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
 }
 
 async function exists(path: string): Promise<boolean> {
-  const { access } = await import('node:fs/promises')
   return access(path).then(
     () => true,
     () => false
