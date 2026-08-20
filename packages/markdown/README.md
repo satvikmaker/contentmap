@@ -1,6 +1,6 @@
 # @contentmap/markdown
 
-The default markdown renderer for [contentmap](https://github.com/contentmap/contentmap), built on [marked](https://github.com/markedjs/marked).
+The default markdown renderer for [contentmap](https://github.com/satvikmaker/contentmap), built on [marked](https://github.com/markedjs/marked).
 
 Renderers are opt-in packages rather than core dependencies: a project rendering only JSON and YAML should not install a markdown parser, and a project that wants remark plugins should not carry marked as dead weight.
 
@@ -41,11 +41,11 @@ export default defineConfig({
 
 `markdown(options)` forwards `options` to marked, so `gfm`, `breaks` and the rest behave exactly as documented upstream.
 
-For remark and rehype plugins instead, use [@contentmap/unified](https://github.com/contentmap/contentmap/tree/main/packages/unified).
+For remark and rehype plugins instead, use [@contentmap/unified](https://github.com/satvikmaker/contentmap/tree/main/packages/unified).
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

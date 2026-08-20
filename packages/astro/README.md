@@ -1,6 +1,6 @@
 # @contentmap/astro
 
-An [Astro](https://astro.build) content-layer loader backed by [contentmap](https://github.com/contentmap/contentmap).
+An [Astro](https://astro.build) content-layer loader backed by [contentmap](https://github.com/satvikmaker/contentmap).
 
 Astro 5 ships its own content layer. This package plugs contentmap into it as a loader, so you keep Astro's `getCollection()` API while contentmap does the parsing, validation and transforms — which means the same config and the same typed output as every other framework you target.
 
@@ -39,11 +39,11 @@ Astro's built-in `glob()` loader is good. Use this one when you want a single co
 
 ## Options
 
-`collection` names the contentmap collection to expose. Every [`BuilderOptions`](https://github.com/contentmap/contentmap#configuration) field is also accepted.
+`collection` names the contentmap collection to expose. Every [`BuilderOptions`](https://github.com/satvikmaker/contentmap#configuration) field is also accepted.
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

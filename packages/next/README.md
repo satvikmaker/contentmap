@@ -1,6 +1,6 @@
 # @contentmap/next
 
-The [Next.js](https://nextjs.org) integration for [contentmap](https://github.com/contentmap/contentmap). Works on **both Turbopack and webpack**.
+The [Next.js](https://nextjs.org) integration for [contentmap](https://github.com/satvikmaker/contentmap). Works on **both Turbopack and webpack**.
 
 ## Install
 
@@ -41,11 +41,11 @@ import { posts } from 'contentmap/generated'
 
 ## Options
 
-Every [`BuilderOptions`](https://github.com/contentmap/contentmap#configuration) field is accepted alongside your Next config.
+Every [`BuilderOptions`](https://github.com/satvikmaker/contentmap#configuration) field is accepted alongside your Next config.
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

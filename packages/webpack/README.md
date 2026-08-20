@@ -1,8 +1,8 @@
 # @contentmap/webpack
 
-The [webpack](https://webpack.js.org) and [Rspack](https://rspack.dev) plugin for [contentmap](https://github.com/contentmap/contentmap).
+The [webpack](https://webpack.js.org) and [Rspack](https://rspack.dev) plugin for [contentmap](https://github.com/satvikmaker/contentmap).
 
-For Next.js, use [@contentmap/next](https://github.com/contentmap/contentmap/tree/main/packages/next) instead — it handles Turbopack too.
+For Next.js, use [@contentmap/next](https://github.com/satvikmaker/contentmap/tree/main/packages/next) instead — it handles Turbopack too.
 
 ## Install
 
@@ -35,11 +35,11 @@ import { posts } from 'contentmap/generated'
 new ContentmapWebpackPlugin({ config: 'contentmap.config.ts' })
 ```
 
-Every [`BuilderOptions`](https://github.com/contentmap/contentmap#configuration) field is accepted.
+Every [`BuilderOptions`](https://github.com/satvikmaker/contentmap#configuration) field is accepted.
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

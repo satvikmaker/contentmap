@@ -1,6 +1,6 @@
 # @contentmap/vite
 
-The [Vite](https://vite.dev) plugin for [contentmap](https://github.com/contentmap/contentmap).
+The [Vite](https://vite.dev) plugin for [contentmap](https://github.com/satvikmaker/contentmap).
 
 One plugin covers **Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start and Analog** — they all build on Vite, so they all take the same integration.
 
@@ -30,7 +30,7 @@ import { posts } from 'contentmap/generated'
 
 ## Options
 
-Every [`BuilderOptions`](https://github.com/contentmap/contentmap#configuration) field is accepted — `config`, `outDir`, `concurrency`, `onValidationError` and the rest.
+Every [`BuilderOptions`](https://github.com/satvikmaker/contentmap#configuration) field is accepted — `config`, `outDir`, `concurrency`, `onValidationError` and the rest.
 
 ## Note
 
@@ -38,7 +38,7 @@ This plugin is a convenience, not a requirement. It runs the same builder as the
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

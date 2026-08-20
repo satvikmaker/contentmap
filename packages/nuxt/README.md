@@ -1,6 +1,6 @@
 # @contentmap/nuxt
 
-The [Nuxt](https://nuxt.com) module for [contentmap](https://github.com/contentmap/contentmap).
+The [Nuxt](https://nuxt.com) module for [contentmap](https://github.com/satvikmaker/contentmap).
 
 ## Install
 
@@ -48,11 +48,11 @@ export default defineNuxtConfig({
 })
 ```
 
-Every [`BuilderOptions`](https://github.com/contentmap/contentmap#configuration) field is accepted.
+Every [`BuilderOptions`](https://github.com/satvikmaker/contentmap#configuration) field is accepted.
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

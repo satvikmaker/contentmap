@@ -1,8 +1,8 @@
 # @contentmap/unified
 
-A [remark](https://github.com/remarkjs/remark)/[rehype](https://github.com/rehypejs/rehype) renderer for [contentmap](https://github.com/contentmap/contentmap), for when you want the plugin ecosystem.
+A [remark](https://github.com/remarkjs/remark)/[rehype](https://github.com/rehypejs/rehype) renderer for [contentmap](https://github.com/satvikmaker/contentmap), for when you want the plugin ecosystem.
 
-[@contentmap/markdown](https://github.com/contentmap/contentmap/tree/main/packages/markdown) is the lighter default. Reach for this one when you need remark or rehype plugins — footnotes, math, syntax highlighting, custom directives.
+[@contentmap/markdown](https://github.com/satvikmaker/contentmap/tree/main/packages/markdown) is the lighter default. Reach for this one when you need remark or rehype plugins — footnotes, math, syntax highlighting, custom directives.
 
 ## Install
 
@@ -47,7 +47,7 @@ Only do this for content you control.
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

@@ -4,6 +4,13 @@
   "description": "The type-safe content layer for every framework.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satvikmaker/contentmap.git",
+    "directory": "packages/contentmap"
+  },
+  "bugs": "https://github.com/satvikmaker/contentmap/issues",
+  "homepage": "https://github.com/satvikmaker/contentmap#readme",
   "engines": { "node": "^22.11.0 || >=24" },
   "bin": { "contentmap": "./dist/cli.js" },
   "exports": {

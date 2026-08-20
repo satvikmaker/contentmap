@@ -1,6 +1,6 @@
 # @contentmap/image
 
-Image dimensions and [thumbhash](https://github.com/evanw/thumbhash) placeholders for [contentmap](https://github.com/contentmap/contentmap).
+Image dimensions and [thumbhash](https://github.com/evanw/thumbhash) placeholders for [contentmap](https://github.com/satvikmaker/contentmap).
 
 Reading dimensions at build time is what lets you set `width` and `height` on every `<img>`, which is the difference between a page that settles and a page that jumps while it loads.
 
@@ -61,7 +61,7 @@ A thumbhash placeholder is a 21-byte payload that expands to a recognisable blur
 
 ## Links
 
-- [contentmap documentation](https://github.com/contentmap/contentmap#readme)
-- [Report an issue](https://github.com/contentmap/contentmap/issues)
+- [contentmap documentation](https://github.com/satvikmaker/contentmap#readme)
+- [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT

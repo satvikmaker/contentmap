@@ -4,6 +4,13 @@
   "description": "remark/rehype renderer for contentmap, for the plugin ecosystem.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satvikmaker/contentmap.git",
+    "directory": "packages/unified"
+  },
+  "bugs": "https://github.com/satvikmaker/contentmap/issues",
+  "homepage": "https://github.com/satvikmaker/contentmap#readme",
   "engines": {
     "node": "^22.11.0 || >=24"
   },
