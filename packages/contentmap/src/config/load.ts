@@ -79,10 +79,15 @@ export async function loadModule(path: string): Promise<LoadedModule> {
   const deps = await scanDeps(abs, source)
   const digest = cacheKey(source, ...(await Promise.all(deps.map(readOrEmpty))))
 
-  // mtimeMs, not Date.now(): a fresh query string per call would leak a module
-  // into Node's ESM registry on every reload and grow memory monotonically.
-  const { mtimeMs } = await stat(abs)
-  const url = `${pathToFileURL(abs).href}?t=${mtimeMs}`
+  // The digest, not Date.now() and not mtimeMs. Date.now() leaks a module into
+  // Node's ESM registry on every reload and grows memory monotonically. mtimeMs
+  // looks like the careful answer and is not: two writes inside the same
+  // millisecond are ordinary while editing, and on a fast machine they produce
+  // the same URL, so the stale module is served and the config change is
+  // simply invisible. That failed two config-reload tests on CI and passed
+  // locally. Keying on content gets both properties — an edit always busts, and
+  // identical content always reuses the same module.
+  const url = `${pathToFileURL(abs).href}?t=${digest}`
 
   try {
     const mod: unknown = await import(url)

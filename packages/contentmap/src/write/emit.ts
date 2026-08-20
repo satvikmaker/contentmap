@@ -74,7 +74,7 @@ export async function emit(
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.${process.pid}.tmp`
   await withFdRetry(() => writeFile(tmp, content, 'utf8'))
-  await rename(tmp, path)
+  await withFdRetry(() => rename(tmp, path))
   stats.emitted.set(path, hash)
   stats.written++
 }

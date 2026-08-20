@@ -53,6 +53,12 @@ function record(builder: ReturnType<typeof createBuilder>): () => string {
     if (event.type === 'build:end') {
       seen.push(`  build:end  ${event.result.documents} doc(s), ${event.result.errors} error(s)`)
     }
+    // The watcher swallows a failed rebuild by design — the next save is
+    // usually the fix — so without this a rebuild that threw looks exactly
+    // like one that hung. On Windows that distinction was the whole answer.
+    if (event.type === 'log' && event.level !== 'debug') {
+      seen.push(`  ${event.level}: ${event.message}`)
+    }
   })
   return () => (seen.length === 0 ? '  (nothing — the watcher never fired)' : seen.join('\n'))
 }
