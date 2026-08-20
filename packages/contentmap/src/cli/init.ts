@@ -13,12 +13,16 @@ export interface InitResult {
   skipped: string[]
   detected: string
   notes: string[]
+  /** Packages the generated config needs that the project does not have yet. */
+  install: string[]
 }
 
 interface Detected {
   name: string
   contentDir: string
   hint: string
+  /** Integration package for this framework, if it needs one. */
+  integration?: string
 }
 
 /**
@@ -30,7 +34,14 @@ interface Detected {
  */
 export async function init(options: InitOptions): Promise<InitResult> {
   const { root, force = false } = options
-  const result: InitResult = { created: [], updated: [], skipped: [], detected: '', notes: [] }
+  const result: InitResult = {
+    created: [],
+    updated: [],
+    skipped: [],
+    detected: '',
+    notes: [],
+    install: []
+  }
 
   const pkg = await readJson(join(root, 'package.json'))
   const detected = detect(pkg)
@@ -59,19 +70,35 @@ export async function init(options: InitOptions): Promise<InitResult> {
 
   if (await addGitignore(root)) result.updated.push('.gitignore')
 
+  // The generated config imports contentmap and zod, and the framework needs
+  // its integration. Scaffolding a project that cannot build, then failing on
+  // the next command with "Cannot find module 'zod'", is a worse first run than
+  // one extra line of output.
+  const installed = dependencyNames(pkg)
+  for (const name of ['contentmap', 'zod', detected.integration]) {
+    if (name !== undefined && !installed.has(name)) result.install.push(name)
+  }
+
   return result
 }
 
+function dependencyNames(pkg: Record<string, unknown> | undefined): Set<string> {
+  return new Set(
+    Object.keys({
+      ...(pkg?.['dependencies'] as Record<string, string> | undefined),
+      ...(pkg?.['devDependencies'] as Record<string, string> | undefined)
+    })
+  )
+}
+
 function detect(pkg: Record<string, unknown> | undefined): Detected {
-  const deps = {
-    ...(pkg?.['dependencies'] as Record<string, string> | undefined),
-    ...(pkg?.['devDependencies'] as Record<string, string> | undefined)
-  }
-  const has = (name: string): boolean => name in deps
+  const deps = dependencyNames(pkg)
+  const has = (name: string): boolean => deps.has(name)
 
   if (has('next')) {
     return {
       name: 'Next.js',
+      integration: '@contentmap/next',
       contentDir: 'content',
       hint: 'Wrap next.config with withContentmap from @contentmap/next. Works on Turbopack and webpack.'
     }
@@ -79,6 +106,7 @@ function detect(pkg: Record<string, unknown> | undefined): Detected {
   if (has('nuxt')) {
     return {
       name: 'Nuxt',
+      integration: '@contentmap/nuxt',
       contentDir: 'content',
       hint: 'Add @contentmap/nuxt to `modules` in nuxt.config.'
     }
@@ -86,6 +114,7 @@ function detect(pkg: Record<string, unknown> | undefined): Detected {
   if (has('astro')) {
     return {
       name: 'Astro',
+      integration: '@contentmap/astro',
       contentDir: 'src/content',
       hint: 'Use contentmapLoader() from @contentmap/astro as a collection loader in src/content.config.ts.'
     }
@@ -93,6 +122,7 @@ function detect(pkg: Record<string, unknown> | undefined): Detected {
   if (has('@sveltejs/kit')) {
     return {
       name: 'SvelteKit',
+      integration: '@contentmap/vite',
       contentDir: 'content',
       hint: 'Add contentmap() from @contentmap/vite to plugins, and alias contentmap/generated in svelte.config.js kit.alias.'
     }
@@ -100,6 +130,7 @@ function detect(pkg: Record<string, unknown> | undefined): Detected {
   if (has('vite')) {
     return {
       name: 'Vite',
+      integration: '@contentmap/vite',
       contentDir: 'content',
       hint: 'Add contentmap() from @contentmap/vite to plugins in vite.config.'
     }

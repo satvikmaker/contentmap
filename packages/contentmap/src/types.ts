@@ -375,6 +375,8 @@ export type EmitFormat = 'modules' | 'bundle' | 'both'
 
 export interface OutputOptions {
   dir?: string
+  /** Incremental cache location. Defaults to `<dir>/.cache`. */
+  cacheDir?: string
   assets?: string
   assetsBase?: string
   assetsName?: string
@@ -403,6 +405,14 @@ export interface UserConfig {
 
 export interface ResolvedOutput {
   dir: string
+  /**
+   * Where incremental caches live. Defaults to `<dir>/.cache`.
+   *
+   * Relocatable because CI mounts a cache volume, and because a bundler that
+   * cleans its own output directory should not be able to take the cache with
+   * it.
+   */
+  cacheDir: string
   assets: string
   assetsBase: string
   assetsName: string
@@ -477,10 +487,21 @@ export interface BuildResult {
   durationMs: number
   cacheHits: number
   diagnostics: readonly Diagnostic[]
+  /**
+   * Wall-clock milliseconds per phase, for `--verbose`.
+   *
+   * Cumulative across concurrent work rather than a partition of `durationMs`:
+   * sixty-four files parse at once, so these overlap each other and overshoot
+   * the total. They answer "which phase dominates", not "where did the
+   * wall-clock go".
+   */
+  phases: Readonly<Record<string, number>>
 }
 
 export interface BuilderOptions {
   config?: string
+  /** Incremental cache location. Defaults to `<outDir>/.cache`. */
+  cacheDir?: string
   /** Refuse network access; remote collections must be satisfied from cache. */
   frozen?: boolean
   root?: string

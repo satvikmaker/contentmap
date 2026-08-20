@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import type { CollectionDefinition, ResolvedConfig, StoreEntry } from '../types.ts'
 import { digest } from '../utils/digest.ts'
 import { withFdRetry } from '../utils/fd.ts'
@@ -319,6 +319,35 @@ export async function emitTypes(config: ResolvedConfig, stats: EmitStats): Promi
   await emit(join(config.output.dir, 'index.d.ts'), lines.join(''), stats)
 }
 
+/**
+ * Remove generated output, and only that.
+ *
+ * The caches default to living inside the output directory, so a blanket rm
+ * takes them too. That makes `build --clean --frozen` — two flags this project
+ * documents for CI — destroy each other: clean discards the only copy of the
+ * remote content, then frozen forbids fetching it again. Cache correctness is
+ * guaranteed by content digests rather than by freshness of the directory, so
+ * keeping it across a clean is safe as well as faster.
+ */
 export async function cleanOutput(config: ResolvedConfig): Promise<void> {
-  await rm(config.output.dir, { recursive: true, force: true })
+  const { dir, cacheDir } = config.output
+  const nested = cacheDir === dir || cacheDir.startsWith(dir + sep)
+  if (!nested) {
+    await rm(dir, { recursive: true, force: true })
+    return
+  }
+
+  // The cache is inside the output directory: remove the siblings around it.
+  const keep = relative(dir, cacheDir).split(sep)[0]
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch {
+    return // nothing to clean
+  }
+  await Promise.all(
+    entries
+      .filter(entry => entry !== keep)
+      .map(entry => rm(join(dir, entry), { recursive: true, force: true }))
+  )
 }

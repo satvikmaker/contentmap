@@ -28,7 +28,11 @@ export function codeFrame(source: string, pos: Position, maxWidth = 100): string
     const marker = n === target ? '>' : ' '
     out.push(`${marker} ${String(n).padStart(width)} | ${text}`)
     if (n === target && pos.column !== undefined && pos.column > 0) {
-      const caretPad = ' '.repeat(Math.min(pos.column - 1, maxWidth))
+      // Clamp to the rendered line, not just to maxWidth. A column mined from a
+      // transformed source (jiti reports positions in its own compiled output)
+      // can exceed the original line, and a caret floating far past the last
+      // character points at nothing while implying the line runs on.
+      const caretPad = ' '.repeat(Math.min(pos.column - 1, text.length, maxWidth))
       out.push(`  ${' '.repeat(width)} | ${caretPad}^`)
     }
   }

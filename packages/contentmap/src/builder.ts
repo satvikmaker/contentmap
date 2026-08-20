@@ -172,12 +172,21 @@ export class Builder {
     return config
   }
 
-  /** Wall-clock per phase, for `--profile`. */
+  /**
+   * Cumulative wall clock per pipeline stage, surfaced by `--verbose`.
+   *
+   * Deliberately leaves only — config, read, load, parse, validate, transform,
+   * emit. Timing an envelope *and* its contents produces a table where the
+   * biggest number is an alias for several of the others, which reads as a
+   * finding and is really an artefact.
+   */
   readonly phases: Record<string, number> = {}
 
-  #time<T>(phase: string, fn: () => Promise<T>): Promise<T> {
+  // Promisable, not Promise: a parser is free to be synchronous, and the
+  // timing wrapper must not be what forces it onto the microtask queue.
+  #time<T>(phase: string, fn: () => T | Promise<T>): Promise<T> {
     const t = performance.now()
-    return fn().finally(() => {
+    return Promise.resolve(fn()).finally(() => {
       this.phases[phase] = (this.phases[phase] ?? 0) + (performance.now() - t)
     })
   }
@@ -201,15 +210,15 @@ export class Builder {
     this.#loaded.clear()
     this.#emit({ type: 'build:start' })
 
-    const config = this.#config ?? (await this.resolve())
+    const config = this.#config ?? (await this.#time('config', () => this.resolve()))
     const diagnostics = new DiagnosticBag()
 
     this.#transformCache ??= new TransformCache(
-      join(config.output.dir, '.cache', 'transforms'),
+      join(config.output.cacheDir, 'transforms'),
       config.configDigest
     )
     this.#transformCache.reset()
-    this.#remote ??= new RemoteStore(join(config.output.dir, '.cache', 'remote'))
+    this.#remote ??= new RemoteStore(join(config.output.cacheDir, 'remote'))
 
     if (config.output.clean) await cleanOutput(config)
 
@@ -242,7 +251,7 @@ export class Builder {
     // hashed and written exactly once.
     await this.#assets.flush(
       config.output.assets,
-      join(config.output.dir, '.cache', 'assets.json'),
+      join(config.output.cacheDir, 'assets.json'),
       config.dryRun
     )
 
@@ -266,7 +275,8 @@ export class Builder {
       warnings: diagnostics.warnings,
       durationMs: performance.now() - started,
       cacheHits,
-      diagnostics: diagnostics.items
+      diagnostics: diagnostics.items,
+      phases: { ...this.phases }
     }
     // Files named by addWatchFile() only become known once a transform has run,
     // so the watched set is refreshed after every build rather than once.
@@ -287,7 +297,7 @@ export class Builder {
    * over the project, and a second doubles the handles and the events.
    */
   async watch(options: WatchOptions = {}): Promise<WatchHandle> {
-    const config = this.#config ?? (await this.resolve())
+    const config = this.#config ?? (await this.#time('config', () => this.resolve()))
     if (this.#watchHandle) return this.#watchHandle
 
     const handle = await startWatch(
@@ -467,9 +477,7 @@ export class Builder {
     const collection = config.collections[name]
     if (!collection) throw new UnknownCollectionError(name, Object.keys(config.collections))
 
-    const promise = this.#time('collect+validate', () =>
-      this.#buildCollection(collection, config, diagnostics, [...stack, name])
-    )
+    const promise = this.#buildCollection(collection, config, diagnostics, [...stack, name])
     this.#inFlight.set(name, promise)
     try {
       const result = await promise
@@ -536,10 +544,8 @@ export class Builder {
     const cacheHits = collected.unchanged.length
     this.#scanned += cached.filter(e => collected.unchanged.includes(e.meta.filePath)).length
 
-    const parsedGroups = await this.#time('parse+validate', () =>
-      mapLimit(collected.files, config.concurrency, async file =>
-        this.#processFile(file, collection, config, diagnostics, stack)
-      )
+    const parsedGroups = await mapLimit(collected.files, config.concurrency, async file =>
+      this.#processFile(file, collection, config, diagnostics, stack)
     )
 
     const fresh = parsedGroups.flat()
@@ -627,7 +633,19 @@ export class Builder {
    * bad date escape as a bare `RangeError: Invalid time value` with no
    * filename at all.
    */
-  async #runTransform(
+  #runTransform(
+    collection: CollectionDefinition,
+    validated: Record<string, unknown>,
+    documentMeta: DocumentMeta,
+    file: { relativePath: string; absolutePath: string; content: string },
+    body: string,
+    diagnostics: DiagnosticBag,
+    stack: readonly string[]
+  ): Promise<Record<string, unknown> | undefined> {
+    return this.#time('transform', () => this.#runTransformInner(collection, validated, documentMeta, file, body, diagnostics, stack))
+  }
+
+  async #runTransformInner(
     collection: CollectionDefinition,
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
@@ -907,7 +925,7 @@ export class Builder {
     }
 
     const policy = config.onValidationError
-    const result = await validate(collection.schema, raw)
+    const result = await this.#time('validate', () => validate(collection.schema, raw))
     if (!result.ok) {
       if (policy !== 'ignore') {
         for (const issue of result.issues) {
@@ -1007,7 +1025,7 @@ export class Builder {
         const docs = await mapLimit(records, config.concurrency, async record => {
           const raw: Record<string, unknown> = { ...record.data }
           if (record.body !== undefined && !(BODY_FIELD in raw)) raw[BODY_FIELD] = record.body
-          const result = await validate(collection.schema, raw)
+          const result = await this.#time('validate', () => validate(collection.schema, raw))
           if (!result.ok) return undefined
           return { ...result.value, _meta: metaForRecord(record, collection) } as AnyDocument
         })
@@ -1298,7 +1316,9 @@ export class Builder {
 
     let parsed
     try {
-      parsed = await parser.parse({ content: file.content, path: file.absolutePath })
+      parsed = await this.#time('parse', () =>
+        parser.parse({ content: file.content, path: file.absolutePath })
+      )
     } catch (error) {
       // js-yaml (vendored by confbox) appends its own multi-line ASCII frame to
       // `.message`. Left alone it lands inside our tree with foreign
@@ -1338,7 +1358,7 @@ export class Builder {
       }
 
       const policy = config.onValidationError
-      const result = await validate(collection.schema, raw)
+      const result = await this.#time('validate', () => validate(collection.schema, raw))
 
       if (!result.ok) {
         if (policy !== 'ignore') {

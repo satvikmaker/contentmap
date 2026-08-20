@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises'
 import { availableParallelism } from 'node:os'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type {
   BuilderOptions,
   CollectionDefinition,
@@ -84,14 +84,27 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
 
   const base = user.root ? resolve(dirname(configPath), user.root) : dirname(configPath)
   const out = user.output ?? {}
+  const dir = resolve(base, options.outDir ?? out.dir ?? '.contentmap')
   const output: ResolvedOutput = {
-    dir: resolve(base, options.outDir ?? out.dir ?? '.contentmap'),
+    dir,
+    cacheDir: resolve(base, options.cacheDir ?? out.cacheDir ?? join(dir, '.cache')),
     assets: resolve(base, out.assets ?? 'public/_content'),
     assetsBase: out.assetsBase ?? '/_content/',
     assetsName: out.assetsName ?? '[name]-[hash:8].[ext]',
     format: options.format ?? out.format ?? 'modules',
     types: out.types ?? 'trampoline',
     clean: options.clean ?? out.clean ?? false
+  }
+
+  if (output.cacheDir === output.dir) {
+    // Otherwise `clean` has no honest move: removing the directory destroys
+    // the cache, and keeping it makes --clean a silent no-op. Failing here is
+    // the only outcome that cannot surprise anyone later.
+    throw new ConfigError(
+      'output.cacheDir must not be the output directory itself',
+      'Point it at a subdirectory such as `.contentmap/.cache` (the default), or somewhere outside the output entirely.',
+      configPath
+    )
   }
 
   if (out.types === 'explicit') {

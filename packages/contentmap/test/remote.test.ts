@@ -202,6 +202,25 @@ describe('remote collections', () => {
     expect(frozen.documents).toBe(2)
   })
 
+  fixtureTest('--clean keeps the cache it is not responsible for', async ({ fixture }) => {
+    // Both flags are documented for CI, and the caches live inside the output
+    // directory. If clean takes the cache with it, `build --clean --frozen`
+    // wipes the only copy of the remote content and then forbids refetching
+    // it — two supported flags that destroy each other.
+    const script = `(() => { let n = 0; return async () => {
+      n++
+      if (n > 1) throw new Error('the network must not be touched when frozen')
+      return new Response(${JSON.stringify(RECORDS)}, { status: 200 })
+    } })()`
+    await fixture.write('contentmap.config.ts', config(scriptedLoader(script)))
+
+    await createBuilder({ root: fixture.dir }).build()
+    const result = await createBuilder({ root: fixture.dir, clean: true, frozen: true }).build()
+
+    expect(result.errors).toBe(0)
+    expect(result.documents).toBe(2)
+  })
+
   fixtureTest('--frozen with a cold cache fails rather than fetching', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(scriptedLoader(OK_FETCH)))
     const result = await createBuilder({ root: fixture.dir, frozen: true }).build()

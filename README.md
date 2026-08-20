@@ -138,7 +138,24 @@ contentmap clean      Remove generated output.
 contentmap init       Scaffold config, sample content and tsconfig path.
 ```
 
-Notable flags: `--frozen` (refuse the network; fail on a cold remote cache), `--json` (machine-readable diagnostics), `--on-validation-error=<fail|warn|skip|ignore>`.
+Notable flags: `--frozen` (refuse the network; fail on a cold remote cache), `--json` (machine-readable diagnostics), `--on-validation-error=<fail|warn|skip|ignore>`, `--cache-dir` (put the incremental cache on a CI cache volume).
+
+`--verbose` shows where the time went:
+
+```
+  phase      cumulative
+  config     111ms
+  read       31ms
+  emit       31ms
+  parse      7ms
+  validate   3ms
+  transform  2ms
+  wall clock 185ms — phases run concurrently and do not sum to it
+```
+
+Only pipeline stages are listed, never an enclosing span as well — a row that is secretly the sum of three others below it reads as a finding and is really an artefact. `--json` carries the same numbers for per-commit tracking.
+
+`--clean` removes generated output but keeps the cache. The two are different things, and discarding a cache whose correctness is guaranteed by content digests only buys a slower build — or, with `--frozen`, a failing one.
 
 ## Errors
 
@@ -162,7 +179,7 @@ Grouped by kind, then by file, with a corpus-level summary. Every diagnostic nam
 
 ## Status
 
-Implemented and tested: the build pipeline, diagnostics, pluggable renderers, transforms, assets and image placeholders, cross-collection references, a persistent transform cache, remote sources, watch mode, and five framework adapters. 226 tests.
+Implemented and tested: the build pipeline, diagnostics, pluggable renderers, transforms, assets and image placeholders, cross-collection references, a persistent transform cache, remote sources, watch mode, and five framework adapters. 243 tests.
 
 Not done:
 
