@@ -1,5 +1,5 @@
 import { describe, expect } from 'vitest'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveConfig } from '../src/config/resolve.ts'
 import { fixtureTest } from './helpers.ts'
@@ -28,7 +28,7 @@ export default defineConfig({ collections: { posts } })
 `
     )
     const config = await resolveConfig({ root: fixture.dir })
-    const names = config.configDeps.map(d => d.split('/').pop())
+    const names = config.configDeps.map(d => basename(d))
     expect(names, 'named import').toContain('schema.ts')
     expect(names, 'side-effect import').toContain('side.ts')
     expect(names, 'multi-line import').toContain('multi.ts')
