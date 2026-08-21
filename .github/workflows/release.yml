@@ -57,4 +57,9 @@ jobs:
 
       - name: Publish
         if: ${{ inputs.dry-run == false }}
+        # Provenance is set here rather than in .npmrc because it needs an OIDC
+        # provider, which exists only in CI. In .npmrc it broke local publishing
+        # partway through a run.
+        env:
+          NPM_CONFIG_PROVENANCE: 'true'
         run: pnpm release
