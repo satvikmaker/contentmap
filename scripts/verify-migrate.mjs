@@ -119,4 +119,32 @@ for (const [tool, source] of CASES) {
   }
 }
 
+// The CLI has to work through a bin symlink, which is the only way anyone
+// actually invokes it. `@contentmap/migrate@0.1.0` shipped an entrypoint
+// guarded on `import.meta.url === file://${process.argv[1]}`; npm links a bin
+// as a symlink, so argv[1] is the link and import.meta.url is the target. They
+// never match and `npx @contentmap/migrate` printed nothing at all. Every unit
+// test passed, because they call migrate() directly.
+{
+  const root = await mkdtemp(join(repo, '.migrate-bin-'))
+  try {
+    await mkdir(join(root, 'bin'), { recursive: true })
+    await symlink(join(repo, 'packages/migrate/dist/cli.js'), join(root, 'bin/contentmap-migrate'))
+    await writeFile(join(root, 'velite.config.ts'), VELITE)
+    const out = spawnSync(join(root, 'bin/contentmap-migrate'), ['--dry-run'], {
+      cwd: root,
+      encoding: 'utf8'
+    })
+    if (out.status === 0 && out.stdout.includes('defineCollection')) {
+      console.log('PASS  cli runs through a bin symlink')
+    } else {
+      failures++
+      console.log('FAIL  cli produced nothing when invoked through its bin symlink')
+      console.log(out.stdout, out.stderr)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5 })
+  }
+}
+
 process.exitCode = failures === 0 ? 0 : 1

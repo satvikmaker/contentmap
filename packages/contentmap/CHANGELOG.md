@@ -1,5 +1,11 @@
 # contentmap
 
+## 0.1.1
+
+### Patch Changes
+
+- Fix `@contentmap/migrate`'s CLI producing no output when invoked through its bin. The entrypoint was guarded on `import.meta.url === file://${process.argv[1]}`, and npm links a bin as a symlink, so the two never match — `npx @contentmap/migrate` did nothing at all.
+
 ## 0.1.0
 
 ### Minor Changes

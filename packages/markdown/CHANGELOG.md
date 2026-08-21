@@ -1,5 +1,12 @@
 # @contentmap/markdown
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - contentmap@0.1.1
+
 ## 0.1.0
 
 ### Patch Changes

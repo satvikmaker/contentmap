@@ -116,8 +116,4 @@ async function exists(path: string): Promise<boolean> {
   )
 }
 
-export { emitConfig }
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exitCode = await run()
-}
+process.exitCode = await run()

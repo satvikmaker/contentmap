@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/vite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vite plugin for contentmap. Covers Vite, SvelteKit, SolidStart, Qwik, React Router, TanStack Start and Analog.",
   "type": "module",
   "license": "MIT",
