@@ -320,6 +320,7 @@ describe('watch mode keeps up with the config', { timeout: 60_000 }, () => {
 
     const builder = createBuilder({ root: fixture.dir })
     await builder.build()
+    const activity = record(builder)
     const handle = await builder.watch({ debounce: 20 })
     try {
       await fixture.write('notes/n1.md', '---\ntitle: Note\n---\nx')
@@ -346,11 +347,19 @@ export default defineConfig({ collections: { posts, notes } })
       })
 
       // The new directory must now be live.
-      await fixture.write('notes/n2.md', '---\ntitle: Second note\n---\nx')
+      //
+      // Rewritten on each attempt rather than once up front. `watcher.add()`
+      // returns before the OS watch is established — noticeably so on Windows,
+      // where a file created inside that gap is never reported. The guarantee
+      // is that edits to the new directory get picked up, not that the first
+      // write after a reload wins the race. A directory that never became
+      // watched still fails here, which is the regression worth catching.
+      let n = 0
       await until(async () => {
+        await writeFile(join(fixture.dir, 'notes/n2.md'), `---\ntitle: Note ${n++}\n---\nx`)
         const index = await readFile(join(fixture.dir, '.contentmap/notes/index.js'), 'utf8')
         expect(index).toContain('"n2"')
-      })
+      }, activity)
     } finally {
       await builder.close()
     }
