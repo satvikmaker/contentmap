@@ -22,7 +22,7 @@ export function idFromPath(relativePath: string): string {
 }
 
 /** Levenshtein distance, capped — powers did-you-mean hints. */
-export function distance(a: string, b: string, max = 3): number {
+function distance(a: string, b: string, max = 3): number {
   if (a === b) return 0
   if (Math.abs(a.length - b.length) > max) return max + 1
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i)

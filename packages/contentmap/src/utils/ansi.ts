@@ -23,4 +23,4 @@ export const blue: (s: string) => string = wrap(34, 39)
 export const cyan: (s: string) => string = wrap(36, 39)
 export const gray: (s: string) => string = wrap(90, 39)
 
-export const colorEnabled: boolean = enabled
+const colorEnabled: boolean = enabled

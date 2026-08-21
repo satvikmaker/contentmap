@@ -17,7 +17,7 @@ export interface SplitResult {
 }
 
 /** A parse failure carrying a file-relative position. */
-export class FrontmatterError extends Error {
+class FrontmatterError extends Error {
   override readonly name = 'FrontmatterError'
   readonly line: number | undefined
   readonly column: number | undefined

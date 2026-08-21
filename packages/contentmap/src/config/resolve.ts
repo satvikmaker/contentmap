@@ -111,7 +111,7 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
   if (out.types === 'explicit') {
     throw new ConfigError(
       "output.types: 'explicit' is not implemented yet",
-      "Use 'trampoline' (the default) or false. Explicit structural .d.ts emission is planned; see docs/ROADMAP.md."
+      "Use 'trampoline' (the default) or false. Explicit structural .d.ts emission is planned: https://github.com/satvikmaker/contentmap/blob/main/ROADMAP.md"
     )
   }
 

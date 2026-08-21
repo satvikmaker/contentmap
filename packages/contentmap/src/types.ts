@@ -352,7 +352,7 @@ export interface InvalidType<Message extends string, T> {
 }
 
 export type NotSerializable =
-  'Documents are written to disk as JavaScript, so every field must be serializable. Functions and symbols cannot be emitted. See https://contentmap.dev/docs/serialization'
+  'Documents are written to disk as JavaScript, so every field must be serializable. Functions and symbols cannot be emitted — return plain data from `transform`.'
 
 /**
  * True when `T` contains a function or symbol anywhere.

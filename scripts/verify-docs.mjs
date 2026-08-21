@@ -114,4 +114,57 @@ try {
   await rm(root, { recursive: true, force: true, maxRetries: 5 })
 }
 
+// The README also names APIs in prose and in example chains, and both drift as
+// readily as a config block. `renderers` vs `renderer` was caught by
+// type-checking the examples; nothing checked the sentence listing every
+// context method, nor the query chain in the quickstart.
+{
+  const readme = await readFile(join(repo, 'README.md'), 'utf8')
+  const types = await readFile(join(repo, 'packages/contentmap/src/types.ts'), 'utf8')
+  const runtime = await readFile(join(repo, 'packages/contentmap/src/runtime/index.ts'), 'utf8')
+
+  // "Inside `transform`, `ctx` gives you: `meta`, `body`, `markdown()`, …"
+  const sentence = readme.slice(readme.indexOf('### Transform context'))
+  const listed = sentence.slice(0, sentence.indexOf('\n\n', sentence.indexOf('gives you')))
+  const claimed = [...listed.matchAll(/`([a-z][A-Za-z]*)\(\)`|`([a-z][A-Za-z]*)`/g)]
+    .map(m => m[1] ?? m[2])
+    .filter(name => name !== 'ctx' && name !== 'transform')
+
+  const ctxBody = types.slice(types.indexOf('export interface TransformContext'))
+  const ctx = ctxBody.slice(0, ctxBody.indexOf('\n}'))
+  const missingCtx = [...new Set(claimed)].filter(
+    name => !new RegExp(`\\b${name}[?]?[(<:]`).test(ctx)
+  )
+  if (claimed.length === 0) {
+    failures++
+    console.log('FAIL  could not read the context-method sentence; this check is stale')
+  } else if (missingCtx.length === 0) {
+    console.log(`PASS  every context member the README names exists (${claimed.length} checked)`)
+  } else {
+    failures++
+    console.log(`FAIL  README names context members that do not exist: ${missingCtx.join(', ')}`)
+  }
+
+  // Every `.method(` used in a documented query chain has to be on Query.
+  const chains = [...readme.matchAll(/```(?:ts|typescript)\n([\s\S]*?)```/g)]
+    .map(m => m[1])
+    .filter(code => code.includes('contentmap/generated'))
+    .join('\n')
+  const used = [...new Set([...chains.matchAll(/\.([a-z][A-Za-z]*)\(/g)].map(m => m[1]))]
+  const queryBody = runtime.slice(runtime.indexOf('export interface Query'))
+  const query = queryBody.slice(0, queryBody.indexOf('\n}'))
+  const missingQuery = used.filter(
+    name => !new RegExp(`\\b${name}[<(]`).test(query) && !['map', 'join', 'filter'].includes(name)
+  )
+  if (used.length === 0) {
+    failures++
+    console.log('FAIL  no documented query chain found; this check is stale')
+  } else if (missingQuery.length === 0) {
+    console.log(`PASS  every query method the README uses exists (${used.length} checked)`)
+  } else {
+    failures++
+    console.log(`FAIL  README uses query methods that do not exist: ${missingQuery.join(', ')}`)
+  }
+}
+
 process.exitCode = failures === 0 ? 0 : 1

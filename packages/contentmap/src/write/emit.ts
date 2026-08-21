@@ -161,7 +161,7 @@ export async function emitCollection({
   // Scoped to this call. A module-level map would leak across builds and
   // across collections, reporting collisions that are not there — and this
   // codebase has no mutable singletons by design.
-  const moduleNames = new Map<string, string>()
+  const moduleNames = new Map<string, { id: string; filePath: string }>()
 
   // A singleton collapses to one document, so per-document modules and a
   // queryable index would both be ceremony around a single object.
@@ -187,18 +187,21 @@ export async function emitCollection({
     // one path and fail on a rename with an ENOENT naming a temp file. Say what
     // actually happened instead.
     const clash = moduleNames.get(mod)
-    if (clash !== undefined && clash !== entry.id) {
+    if (clash !== undefined && clash.id !== entry.id) {
       diagnostics.add({
         code: 'CM_MODULE_COLLISION',
         severity: 'error',
-        message: `Documents "${clash}" and "${entry.id}" both emit the module "${mod}.js"`,
+        message: `Documents "${clash.id}" and "${entry.id}" both emit the module "${mod}.js"`,
+        // The file is what the user renames, so naming it is the whole point —
+        // matching how a duplicate id reports itself.
+        file: entry.meta.filePath,
         collection: collection.name,
         documentId: entry.id,
-        hint: 'Rename one of the source files.'
+        hint: `Already claimed by "${clash.filePath}". Rename one of the two files.`
       })
-      return
+      return undefined
     }
-    moduleNames.set(mod, entry.id)
+    moduleNames.set(mod, { id: entry.id, filePath: entry.meta.filePath })
     const file = `${mod}.js`
     const path = join(dir, file)
     // emitKey, not digest: output depends on referenced assets too.

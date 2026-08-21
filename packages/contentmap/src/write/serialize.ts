@@ -1,4 +1,5 @@
 import { digest } from '../utils/digest.ts'
+
 /**
  * Serialize a value to evaluable JavaScript.
  *

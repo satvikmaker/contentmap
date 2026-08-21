@@ -1,5 +1,11 @@
 # contentmap
 
+## 0.3.1
+
+### Patch Changes
+
+- Removes a dead documentation URL from an error message, narrows four exports that were never public, and makes the collision diagnostic name the file to rename. Adds a docs gate that checks the API names the README claims in prose, not only its code examples.
+
 ## 0.3.0
 
 ### Minor Changes
