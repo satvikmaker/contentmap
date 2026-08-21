@@ -1,3 +1,4 @@
+import { digest } from '../utils/digest.ts'
 /**
  * Serialize a value to evaluable JavaScript.
  *
@@ -112,8 +113,26 @@ function write(
   }
 }
 
-/** Safe module-name fragment for a document id. `a/b` -> `a__b`. */
+/**
+ * Safe module-name fragment for a document id. `a/b` -> `a__b`.
+ *
+ * Sanitising alone is lossy, and lossy means collisions: `a b` and `a+b` both
+ * became `a__b`, as did every pair of non-latin filenames, since the whole name
+ * collapses to `__`. Two documents then raced to write one path and the build
+ * died on a rename with an ENOENT naming a temp file — for filenames as ordinary
+ * as a space and a plus.
+ *
+ * A short digest of the full id is appended whenever sanitising changed
+ * anything, so ids that were already safe keep their readable filename and
+ * everything else is unique and stable.
+ */
 export function moduleNameFor(id: string): string {
-  const safe = id.replace(/[^A-Za-z0-9._-]+/g, '__')
-  return /^[0-9]/.test(safe) ? `_${safe}` : safe || '_index'
+  // `/` is the one lossy replacement worth making silently: nested documents
+  // are universal, and suffixing them all would rename every file in the output
+  // directory to guard against a case nobody has hit.
+  const flattened = id.replaceAll('/', '__')
+  const safe = flattened.replace(/[^A-Za-z0-9._-]+/g, '__')
+  const prefixed = /^[0-9]/.test(safe) ? `_${safe}` : safe || '_index'
+  if (safe === flattened) return prefixed
+  return `${prefixed}-${digest(id).slice(0, 8)}`
 }

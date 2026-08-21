@@ -35,6 +35,9 @@ docs/
 .wb-*/
 .vite-e2e-*/
 .types-*/
+.cli-*/
+.docs-*/
+.migrate-*/
 .compare/
 bench-results.json
 

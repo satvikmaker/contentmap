@@ -1,5 +1,17 @@
 # contentmap
 
+## 0.3.0
+
+### Minor Changes
+
+- Two documents can no longer be given the same output filename.
+
+  Module names were produced by replacing every unsafe character with `__`, which is lossy: `a b` and `a+b` both became `a__b`, as did any pair of non-latin filenames, since the whole name collapses. Both documents then raced to write one path and the build died on a rename with an `ENOENT` naming a temp file — for filenames as ordinary as a space and a plus.
+
+  A short digest of the id is now appended whenever sanitising changed anything other than a `/`, so nested documents keep their readable filenames and everything else is unique. An emit-time check reports the one residual case — a file literally named `a__b` beside a directory `a/` — instead of racing for the file.
+
+  Temp files used during an atomic write also carry a counter, so two writes to the same path can no longer clobber each other's temp file.
+
 ## 0.2.0
 
 ### Minor Changes

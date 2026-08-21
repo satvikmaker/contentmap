@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/astro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Astro content-layer loader backed by contentmap.",
   "type": "module",
   "license": "MIT",

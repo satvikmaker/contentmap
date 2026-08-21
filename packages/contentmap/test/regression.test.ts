@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createBuilder } from '../src/builder.ts'
+import { moduleNameFor } from '../src/write/serialize.ts'
 import { fixtureTest } from './helpers.ts'
 
 const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
@@ -331,4 +332,100 @@ export default defineConfig({ collections: { posts }, renderer: markdown() })`)
       expect(d?.message).toMatch(/function/i)
     }
   )
+})
+
+describe('module names cannot collide', () => {
+  it('leaves an already-safe id readable', () => {
+    // No digest suffix for the common case, or every filename in the output
+    // directory becomes unreadable to buy safety almost nobody needs.
+    expect(moduleNameFor('hello-world')).toBe('hello-world')
+    expect(moduleNameFor('posts.2024')).toBe('posts.2024')
+    // Nested documents are universal, so a slash flattens without a suffix.
+    // Suffixing them would rename every file in the output directory of every
+    // project that has a subdirectory, to guard a case nobody has hit.
+    expect(moduleNameFor('a/b')).toBe('a__b')
+  })
+
+  it('distinguishes ids that sanitise to the same string', () => {
+    // `a b` and `a+b` both became `a__b`, as did every pair of non-latin
+    // filenames, since the whole name collapses to `__`. Two documents then
+    // raced to write one path and the build died on a rename.
+    const pairs = [
+      ['a b', 'a+b'],
+      ['日本語', '中文'],
+      ['hello(world)', 'hello world'],
+      ['Привет', 'مرحبا']
+    ]
+    for (const [x, y] of pairs) {
+      expect(moduleNameFor(x), `${x} vs ${y}`).not.toBe(moduleNameFor(y))
+    }
+  })
+
+  fixtureTest(
+    'reports the residual collision rather than racing for the file',
+    async ({ fixture }) => {
+      // `a/b` flattens to `a__b`, so a file literally named `a__b` beside a
+      // directory `a/` still collides. Vanishingly rare, and previously an ENOENT
+      // naming a temp file. Now it says what happened.
+      await fixture.write(
+        'contentmap.config.ts',
+        `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({
+  directory: 'content', include: '**/*.md', schema: z.object({ title: z.string() })
+})
+export default defineConfig({ collections: { posts } })
+`
+      )
+      await fixture.write('content/a/b.md', '---\ntitle: Nested\n---\nx')
+      await fixture.write('content/a__b.md', '---\ntitle: Flat\n---\nx')
+
+      const result = await createBuilder({ root: fixture.dir }).build()
+
+      expect(result.errors).toBe(1)
+      const clash = result.diagnostics.find(d => d.code === 'CM_MODULE_COLLISION')
+      expect(clash?.message).toContain('both emit the module')
+    }
+  )
+
+  it('is stable for the same id', () => {
+    // The filename is referenced from the index, so it has to be a pure
+    // function of the id and not of anything about this build.
+    expect(moduleNameFor('日本語')).toBe(moduleNameFor('日本語'))
+  })
+
+  it('never starts with a digit', () => {
+    expect(moduleNameFor('2024-review')).toMatch(/^[_A-Za-z]/)
+    expect(moduleNameFor('2024 review')).toMatch(/^[_A-Za-z]/)
+  })
+})
+
+describe('documents whose filenames differ only in punctuation', () => {
+  fixtureTest('all reach the output', async ({ fixture }) => {
+    // A space and a plus are ordinary filenames. Both used to produce the same
+    // module path, and the build failed on an ENOENT naming a temp file.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({
+  directory: 'content', include: '**/*.md', schema: z.object({ title: z.string() })
+})
+export default defineConfig({ collections: { posts } })
+`
+    )
+    await fixture.write('content/a b.md', '---\ntitle: Space\n---\nx')
+    await fixture.write('content/a+b.md', '---\ntitle: Plus\n---\nx')
+    await fixture.write('content/日本語.md', '---\ntitle: Japanese\n---\nx')
+    await fixture.write('content/中文.md', '---\ntitle: Chinese\n---\nx')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+
+    expect(result.errors).toBe(0)
+    expect(result.documents).toBe(4)
+    const modules = (await readdir(join(fixture.dir, '.contentmap/posts'))).filter(
+      f => f !== 'index.js'
+    )
+    expect(new Set(modules).size, `distinct modules: ${modules}`).toBe(4)
+  })
 })
