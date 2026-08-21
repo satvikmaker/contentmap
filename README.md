@@ -181,11 +181,29 @@ Yes — CI runs Linux, macOS and Windows on Node 22 and 24.
 
 ---
 
-## Status
+## Roadmap
 
-**0.x — no stability promise yet.** The API is exercised by 281 tests and a CI matrix across three operating systems and two Node versions, with gates for silent data loss, bundle size, install footprint, cross-platform behaviour, and a real build of every framework example. It has not yet been through contact with many real projects.
+Shipped in 0.1 — see [ROADMAP.md](ROADMAP.md) for the detail.
 
-Not done: MDX compilation, a documentation site, `@contentmap/git`, per-commit performance tracking, and an API freeze.
+- [x] Typed pipeline: any Standard Schema validator, per-document output, typed projections
+- [x] Markdown, MDX frontmatter, YAML, JSON, JSONC, TOML, raw, and custom parsers
+- [x] Images, assets, cross-collection references, persistent transform cache
+- [x] Remote sources with digest revalidation, offline `--frozen` builds
+- [x] Watch mode, diagnostics with code frames, `--json` for CI
+- [x] Five framework adapters, each proven against its real toolchain in CI
+- [x] `@contentmap/migrate` for contentlayer2, velite and content-collections
+
+Coming next:
+
+- [ ] MDX compilation
+- [ ] `@contentmap/shiki` syntax highlighting
+- [ ] Search index generation for Pagefind, Orama and MiniSearch
+- [ ] `@contentmap/git` — dates and authors from history
+- [ ] `$schema` autocomplete for frontmatter in your editor
+- [ ] Documentation site
+- [ ] Bun and Deno in the CI matrix
+
+[Open an issue](https://github.com/satvikmaker/contentmap/issues) to move something up the list.
 
 ## License
 
