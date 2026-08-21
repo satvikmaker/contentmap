@@ -36,7 +36,7 @@ const HELPERS: Record<string, Helper> = {
     message: 'rendering is a transform in contentmap, not a schema field',
     hint:
       'Add `content: z.string()` and, in transform, `html: await ctx.markdown()`. ' +
-      'Register a renderer: `renderers: [markdown()]` from @contentmap/markdown.'
+      'Register a renderer: `renderer: markdown()` from @contentmap/markdown.'
   },
   mdx: {
     kind: 'unsupported',

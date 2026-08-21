@@ -64,6 +64,13 @@ jobs:
       # Our type tests import `../src`; a user imports the emitted `.d.ts`. Two
       # type bugs shipped through that gap and failed real `next build`s.
       - run: pnpm verify:types
+      # The error a user sees comes from the shipped binary, not from run()
+      # imported into a test where the config loads through a different path.
+      - run: pnpm verify:cli
+      # Config examples in the READMEs are type-checked against the built
+      # package. `renderers: [markdown()]` was documented in three places and
+      # the option is called `renderer`.
+      - run: pnpm verify:docs
       # A migrated config has to build, not merely look like a config. This
       # caught a rewrite that referenced a parameter the function never declared.
       - run: pnpm verify:migrate

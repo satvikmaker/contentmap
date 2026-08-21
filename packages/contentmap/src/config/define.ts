@@ -10,10 +10,23 @@ import type {
 } from '../types.ts'
 
 /**
+ * Reject options that are not options.
+ *
+ * `T extends UserConfig` alone accepts any extra key, because T is inferred
+ * from the argument and structurally still satisfies the constraint. So
+ * `renderers: [markdown()]` compiled, was ignored, and surfaced later as "No
+ * renderer configured" — a runtime error for something the compiler was
+ * holding in its hand. It was wrong in three of our own READMEs for the same
+ * reason. Mapping unknown keys to `never` turns a typo into an error at the
+ * line that made it.
+ */
+type NoExtra<T, Shape> = T & { [K in Exclude<keyof T, keyof Shape>]: never }
+
+/**
  * Identity functions. Zero runtime cost; they exist purely so TypeScript can
  * infer the collection's schema and transform types at the definition site.
  */
-export function defineConfig<const T extends UserConfig>(config: T): T {
+export function defineConfig<const T extends UserConfig>(config: NoExtra<T, UserConfig>): T {
   return config
 }
 

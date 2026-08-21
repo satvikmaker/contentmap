@@ -19,7 +19,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { z } from 'zod'
 
 export default defineConfig({
-  renderers: [unifiedRenderer({ rehypePlugins: [rehypeHighlight] })],
+  renderer: unifiedRenderer({ rehypePlugins: [rehypeHighlight] }),
   collections: {
     posts: defineCollection({
       directory: 'content/posts',

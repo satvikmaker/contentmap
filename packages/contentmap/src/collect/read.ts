@@ -1,7 +1,12 @@
 import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import { glob } from 'tinyglobby'
-import type { CollectionDefinition, DocumentMeta, ResolvedConfig } from '../types.ts'
+import type {
+  CollectionDefinition,
+  DocumentMeta,
+  ResolvedConfig,
+  ResolvedCollection
+} from '../types.ts'
 import { digest } from '../utils/digest.ts'
 import { withFdRetry } from '../utils/fd.ts'
 import { mapLimit } from '../utils/limit.ts'
@@ -62,7 +67,7 @@ export interface CollectOptions {
 }
 
 export async function collectFiles(
-  collection: CollectionDefinition,
+  collection: ResolvedCollection,
   config: ResolvedConfig,
   options: CollectOptions = {}
 ): Promise<CollectResult> {

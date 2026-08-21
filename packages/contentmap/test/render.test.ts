@@ -1,4 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { createBuilder } from '../src/builder.ts'
+import { fixtureTest } from './helpers.ts'
+
+const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
+const MARKDOWN = pathToFileURL(resolve(import.meta.dirname, '../../markdown/src/index.ts')).href
 import { markdown } from '../../markdown/src/index.ts'
 import { unifiedRenderer } from '../../unified/src/index.ts'
 import {
@@ -306,5 +314,78 @@ describe('no renderer configured', () => {
     // Plain-text sources stay useful without a renderer.
     const rt = await ctx('one two three').readingTime()
     expect(rt.words).toBe(3)
+  })
+})
+
+describe('transform context isolation', () => {
+  fixtureTest('never serves one document’s render to another', async ({ fixture }) => {
+    // The memo lives in a per-document closure. If it ever escaped to module
+    // scope, every document after the first would silently show the first
+    // one's HTML — a wrong answer with no error anywhere, on the single most
+    // used method in the API.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { markdown } from ${JSON.stringify(MARKDOWN)}
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string(), content: z.string() }),
+  transform: async (doc, ctx) => ({ ...doc, html: await ctx.markdown(), words: (await ctx.readingTime()).words })
+})
+export default defineConfig({ renderer: markdown(), collections: { posts } })
+`
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n\nAlpha body alpha.')
+    await fixture.write('content/b.md', '---\ntitle: B\n---\n\nBeta body beta beta beta.')
+
+    const result = await createBuilder({ root: fixture.dir, concurrency: 8 }).build()
+    expect(result.errors, JSON.stringify(result.diagnostics.map(d => d.message))).toBe(0)
+
+    const a = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    const b = await readFile(join(fixture.dir, '.contentmap/posts/b.js'), 'utf8')
+
+    expect(a).toContain('Alpha body alpha')
+    expect(a).not.toContain('Beta body')
+    expect(b).toContain('Beta body beta')
+    expect(b).not.toContain('Alpha body')
+  })
+
+  fixtureTest('renders once however many derivations ask for it', async ({ fixture }) => {
+    // markdown(), plain(), excerpt(), toc() and readingTime() all need the
+    // rendered document. Rendering per call would multiply the cost of the
+    // most expensive step in the pipeline by five.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, defineParser } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+let renders = 0
+const counting = {
+  name: 'counting',
+  toHtml: (input) => { renders++; return '<p>' + input.body + '</p>' }
+}
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string(), content: z.string() }),
+  transform: async (doc, ctx) => {
+    await ctx.markdown()
+    await ctx.plain()
+    await ctx.excerpt()
+    await ctx.toc()
+    await ctx.readingTime()
+    await ctx.markdown()
+    return { ...doc, renders }
+  }
+})
+export default defineConfig({ renderer: counting, collections: { posts } })
+`
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\n\n## Heading\n\nSome body text here.')
+
+    const result = await createBuilder({ root: fixture.dir }).build()
+    expect(result.errors, JSON.stringify(result.diagnostics.map(d => d.message))).toBe(0)
+
+    const emitted = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(emitted).toContain('renders: 1')
   })
 })

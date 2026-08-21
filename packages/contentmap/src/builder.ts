@@ -92,7 +92,8 @@ import type {
   Logger,
   ResolvedConfig,
   Severity,
-  StoreEntry
+  StoreEntry,
+  ResolvedCollection
 } from './types.ts'
 
 type Listener = (event: BuilderEvent) => void
@@ -487,7 +488,7 @@ export class Builder {
   }
 
   async #buildCollection(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -632,7 +633,7 @@ export class Builder {
    * filename at all.
    */
   #runTransform(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
     file: { relativePath: string; absolutePath: string; content: string },
@@ -646,7 +647,7 @@ export class Builder {
   }
 
   async #runTransformInner(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
     file: { relativePath: string; absolutePath: string; content: string },
@@ -718,7 +719,7 @@ export class Builder {
   /** Has anything this document depends on changed since it was built? */
   async #dependenciesChanged(
     entry: StoreEntry,
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -737,7 +738,7 @@ export class Builder {
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[],
-    collection: CollectionDefinition
+    collection: ResolvedCollection
   ): Promise<Map<string, PreviousState> | undefined> {
     if (!previous) return previous
     let next: Map<string, PreviousState> | undefined
@@ -763,7 +764,7 @@ export class Builder {
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[],
-    self: CollectionDefinition
+    self: ResolvedCollection
   ): Promise<boolean> {
     for (const ref of refs) {
       // A collection that no longer exists means the reference is gone too.
@@ -802,7 +803,7 @@ export class Builder {
    * uses the record digest the loader reports.
    */
   async #buildFromLoader(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -913,7 +914,7 @@ export class Builder {
   /** Validate and transform one loader record. */
   async #processRecord(
     record: LoadedRecord,
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -1015,7 +1016,7 @@ export class Builder {
    * cached entries only retain their POST-transform data.
    */
   #validatedDocuments(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag
   ): Promise<AnyDocument[]> {
@@ -1057,7 +1058,7 @@ export class Builder {
    * Relations, caching and file emission for one document.
    */
   #services(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     documentMeta: DocumentMeta,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -1178,7 +1179,7 @@ export class Builder {
    * root, because that is how an author reads their own markdown.
    */
   #assetContext(
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     documentMeta: DocumentMeta,
     from: string
   ): {
@@ -1298,7 +1299,7 @@ export class Builder {
    */
   async #parseFile(
     file: SourceFile,
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     count = true
@@ -1422,7 +1423,7 @@ export class Builder {
   /** Parse, validate, then transform. Produces the entries that get emitted. */
   async #processFile(
     file: SourceFile,
-    collection: CollectionDefinition,
+    collection: ResolvedCollection,
     config: ResolvedConfig,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -1583,7 +1584,7 @@ const refKey = (collection: string, id: string): string => `${collection}\u0000$
  * `filePath` becomes `<loader>:<id>`, which is what diagnostics print, so a
  * failure in a remote collection still says where it came from.
  */
-function metaForRecord(record: LoadedRecord, collection: CollectionDefinition): DocumentMeta {
+function metaForRecord(record: LoadedRecord, collection: ResolvedCollection): DocumentMeta {
   const loader = collection.loader?.name ?? 'loader'
   return {
     id: record.id,

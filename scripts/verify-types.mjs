@@ -101,6 +101,49 @@ try {
     console.log(tsc.stdout.trim())
     process.exitCode = 1
   }
+
+  // Guard rails need proving too. A config option that does not exist used to
+  // compile, be ignored, and fail at runtime with something unrelated — which
+  // is how `renderers` reached three of our own READMEs. Each case below must
+  // NOT compile.
+  const mustFail = [
+    [
+      'an option that does not exist',
+      `import { defineCollection, defineConfig } from 'contentmap'\n` +
+        `import { z } from 'zod'\n` +
+        `const posts = defineCollection({ directory: 'content/posts', include: '**/*.md', schema: z.object({ title: z.string() }) })\n` +
+        `export default defineConfig({ collections: { posts }, renderers: [] })\n`
+    ],
+    [
+      'a misspelled collection option',
+      `import { defineCollection, defineConfig } from 'contentmap'\n` +
+        `import { z } from 'zod'\n` +
+        `const posts = defineCollection({ directory: 'content/posts', includ: '**/*.md', schema: z.object({ title: z.string() }) })\n` +
+        `export default defineConfig({ collections: { posts } })\n`
+    ]
+  ]
+
+  for (const [label, code] of mustFail) {
+    const file = join(root, 'negative.ts')
+    await writeFile(file, code)
+    const run = spawnSync(
+      process.execPath,
+      [
+        join(repo, 'node_modules/typescript/bin/tsc'),
+        '--noEmit',
+        '-p',
+        join(root, 'tsconfig.json')
+      ],
+      { encoding: 'utf8' }
+    )
+    if (run.status !== 0) {
+      console.log(`PASS  rejected at compile time: ${label}`)
+    } else {
+      console.log(`FAIL  compiled but should not have: ${label}`)
+      process.exitCode = 1
+    }
+    await rm(file, { force: true })
+  }
 } finally {
   await rm(root, { recursive: true, force: true, maxRetries: 5 })
 }

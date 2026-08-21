@@ -6,7 +6,8 @@ import type {
   CollectionDefinition,
   ResolvedConfig,
   ResolvedOutput,
-  UserConfig
+  UserConfig,
+  ResolvedCollection
 } from '../types.ts'
 import { DEFAULT_ASSET_EXTENSIONS } from '../assets/index.ts'
 import { isIdentifier } from '../utils/paths.ts'
@@ -149,8 +150,8 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
 function validateCollections(
   input: Record<string, CollectionDefinition>,
   base: string
-): Record<string, CollectionDefinition> {
-  const out: Record<string, CollectionDefinition> = {}
+): Record<string, ResolvedCollection> {
+  const out: Record<string, ResolvedCollection> = {}
   const typeNames = new Map<string, string>()
   const names = new Map<string, string>()
 

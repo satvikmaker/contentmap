@@ -48,3 +48,6 @@ examples/*/.next
 examples/*/next-env.d.ts
 examples/*/.nuxt
 examples/*/.output
+
+# contentmap generated output
+.contentmap

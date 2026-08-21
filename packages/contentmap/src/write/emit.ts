@@ -1,7 +1,12 @@
 import { constants } from 'node:fs'
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'node:path'
-import type { CollectionDefinition, ResolvedConfig, StoreEntry } from '../types.ts'
+import type {
+  CollectionDefinition,
+  ResolvedConfig,
+  StoreEntry,
+  ResolvedCollection
+} from '../types.ts'
 import { digest } from '../utils/digest.ts'
 import { withFdRetry } from '../utils/fd.ts'
 import { mapLimit } from '../utils/limit.ts'
@@ -95,7 +100,7 @@ const WRITE_CONCURRENCY = 64
 
 function splitFields(
   entry: StoreEntry,
-  collection: CollectionDefinition
+  collection: ResolvedCollection
 ): { index: Record<string, unknown>; full: Record<string, unknown> } {
   const heavy = new Set(collection.heavy ?? [])
   const allow = collection.index ? new Set(collection.index) : undefined
@@ -121,7 +126,7 @@ function splitFields(
 }
 
 export interface EmitCollectionInput {
-  collection: CollectionDefinition
+  collection: ResolvedCollection
   entries: readonly StoreEntry[]
   config: ResolvedConfig
   stats: EmitStats

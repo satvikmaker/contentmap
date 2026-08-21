@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpath } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,8 @@ export interface Fixture {
   write(relative: string, content: string): Promise<string>
   /** Binary write, creating parent directories like `write` does. */
   writeBytes(relative: string, content: Uint8Array): Promise<string>
+  /** Read back a file, rejecting if it was never written. */
+  read(relative: string): Promise<string>
 }
 
 /**
@@ -35,6 +37,9 @@ export const fixtureTest = test.extend<{ fixture: Fixture }>({
         await mkdir(dirname(path), { recursive: true })
         await writeFile(path, content)
         return path
+      },
+      async read(relative) {
+        return await readFile(join(dir, relative), 'utf8')
       }
     })
     // maxRetries: the OS can still be releasing handles from a watcher that

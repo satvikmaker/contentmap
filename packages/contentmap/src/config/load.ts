@@ -127,6 +127,11 @@ async function readOrEmpty(p: string): Promise<string> {
 const IMPORT_RE = /(?:^|[\s;])(?:import|export)\b[^'"]*?from\s*['"](\.[^'"]+)['"]/g
 const BARE_IMPORT_RE = /(?:^|[\s;])import\s*['"](\.[^'"]+)['"]/g
 const REQUIRE_RE = /\brequire\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g
+// `const { S } = await import('./schema.ts')` is an ordinary way to split a
+// config up, and it was invisible to the scan: the file was never watched, so
+// editing it in dev changed nothing and the config quietly served the old
+// schema. Shaped like REQUIRE_RE because the syntax is the same.
+const DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g
 
 const EXTENSIONS = ['', '.ts', '.mts', '.js', '.mjs', '/index.ts', '/index.js']
 
@@ -139,7 +144,7 @@ const EXTENSIONS = ['', '.ts', '.mts', '.js', '.mjs', '/index.ts', '/index.js']
 async function scanDeps(entry: string, source: string): Promise<string[]> {
   const found = new Set<string>()
   const base = dirname(entry)
-  for (const re of [IMPORT_RE, BARE_IMPORT_RE, REQUIRE_RE]) {
+  for (const re of [IMPORT_RE, BARE_IMPORT_RE, REQUIRE_RE, DYNAMIC_IMPORT_RE]) {
     re.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = re.exec(source)) !== null) {

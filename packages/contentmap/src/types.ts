@@ -280,7 +280,14 @@ export interface CollectionDefinition<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOut = unknown
 > {
-  name: string
+  /**
+   * Defaults to the key in `collections`.
+   *
+   * Required by the type until 0.2, while the resolver had always defaulted it
+   * — so the docs omitted it, the compiler demanded it, and every config
+   * repeated a name it had already written one line above.
+   */
+  name?: string
   /**
    * Where the documents come from.
    *
@@ -397,6 +404,15 @@ export interface OutputOptions {
   clean?: boolean
 }
 
+/**
+ * A collection after resolution, with every default filled in.
+ *
+ * `name` is optional on the way in and guaranteed on the way out, so the
+ * builder never has to re-derive it and a user never has to repeat the key
+ * they just wrote.
+ */
+export type ResolvedCollection = CollectionDefinition & { name: string }
+
 export interface UserConfig {
   collections: Record<string, CollectionDefinition>
   root?: string
@@ -442,7 +458,7 @@ export interface ResolvedConfig {
   configDeps: readonly string[]
   /** sha256 over the config source and its local imports. Namespaces the cache. */
   configDigest: string
-  collections: Record<string, CollectionDefinition>
+  collections: Record<string, ResolvedCollection>
   output: ResolvedOutput
   parsers: readonly Parser[]
   renderer: Renderer | undefined

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -115,6 +115,114 @@ describe('vite plugin', () => {
     ])
     const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
     expect(index).toContain('"a"')
+  })
+})
+
+/**
+ * A Vite dev server, recording what the plugin does to it.
+ *
+ * Shaped like the real thing in the ways the plugin touches: a chokidar-like
+ * watcher, both module graphs, and a hot channel.
+ */
+function fakeServer(options: { chokidarLike?: boolean } = {}) {
+  const invalidated: string[] = []
+  const sent: unknown[] = []
+  const watcherCalls: string[] = []
+  const watcher =
+    options.chokidarLike === false
+      ? ({} as Record<string, unknown>)
+      : {
+          on: () => watcherCalls.push('on'),
+          off: () => watcherCalls.push('off'),
+          add: () => watcherCalls.push('add'),
+          unwatch: () => watcherCalls.push('unwatch'),
+          close: async () => {}
+        }
+  return {
+    invalidated,
+    sent,
+    server: {
+      watcher,
+      config: { logger: { info: () => {} } },
+      moduleGraph: {
+        getModuleById: (id: string) => ({ id }),
+        invalidateModule: (mod: { id: string }) => invalidated.push(`graph:${mod.id}`)
+      },
+      environments: {
+        ssr: {
+          runner: {
+            evaluatedModules: {
+              getModuleById: (id: string) => ({ id }),
+              invalidateModule: (mod: unknown) =>
+                invalidated.push(`runner:${(mod as { id: string }).id}`)
+            }
+          }
+        }
+      },
+      hot: { send: (payload: unknown) => sent.push(payload) }
+    }
+  }
+}
+
+describe('vite dev server', () => {
+  fixtureTest('reuses Vite’s watcher rather than starting a second one', async ({ fixture }) => {
+    // Two watchers means double the handles and two events per edit, which is
+    // how a debounce that looks correct still rebuilds twice.
+    await seed(fixture)
+    const plugin = vitePlugin({ root: fixture.dir })
+    await plugin.config?.({ root: fixture.dir })
+    await plugin.configResolved?.({ root: fixture.dir, command: 'serve' })
+    await plugin.buildStart?.()
+    const { server } = fakeServer()
+
+    await plugin.configureServer?.(server as never)
+    try {
+      // It adopted the host's watcher, so it called methods on it.
+      expect((server.watcher as { on: unknown }).on).toBeTypeOf('function')
+    } finally {
+      await plugin.buildEnd?.()
+    }
+  })
+
+  fixtureTest('falls back to its own watcher on a non-chokidar host', async ({ fixture }) => {
+    // A Vite-compatible host need not ship chokidar. Handing our watcher an
+    // object without `on` would throw rather than degrade.
+    await seed(fixture)
+    const plugin = vitePlugin({ root: fixture.dir })
+    await plugin.config?.({ root: fixture.dir })
+    await plugin.configResolved?.({ root: fixture.dir, command: 'serve' })
+    await plugin.buildStart?.()
+    const { server } = fakeServer({ chokidarLike: false })
+
+    await expect(plugin.configureServer?.(server as never)).resolves.not.toThrow()
+    await plugin.buildEnd?.()
+  })
+
+  fixtureTest('invalidates both module graphs and asks for a reload', async ({ fixture }) => {
+    // From Vite 6 the module runner keeps its own evaluated-module cache.
+    // Clearing moduleGraph alone leaves the server executing the previous
+    // version, so dev shows stale content with no error anywhere.
+    await seed(fixture)
+    const plugin = vitePlugin({ root: fixture.dir })
+    await plugin.config?.({ root: fixture.dir })
+    await plugin.configResolved?.({ root: fixture.dir, command: 'serve' })
+    await plugin.buildStart?.()
+    const { server, invalidated, sent } = fakeServer()
+
+    await plugin.configureServer?.(server as never)
+    try {
+      await fixture.write('content/c.md', '---\ntitle: C\n---\nbody')
+      await vi.waitFor(
+        () => {
+          expect(invalidated.some(i => i.startsWith('graph:'))).toBe(true)
+          expect(invalidated.some(i => i.startsWith('runner:'))).toBe(true)
+          expect(sent).not.toHaveLength(0)
+        },
+        { timeout: 30_000, interval: 25 }
+      )
+    } finally {
+      await plugin.buildEnd?.()
+    }
   })
 })
 

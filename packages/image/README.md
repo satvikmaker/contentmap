@@ -18,7 +18,7 @@ import { image } from '@contentmap/image'
 import { z } from 'zod'
 
 export default defineConfig({
-  image: image(),
+  images: image(),
   collections: {
     posts: defineCollection({
       directory: 'content/posts',

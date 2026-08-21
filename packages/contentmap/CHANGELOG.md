@@ -1,5 +1,16 @@
 # contentmap
 
+## 0.2.0
+
+### Minor Changes
+
+- Stabilization release.
+
+  - `defineConfig` now rejects options that do not exist. A bare generic constraint accepted any extra key, so a misspelled or wrong option compiled, was ignored, and failed later as something unrelated — which is how `renderers: [markdown()]` reached three READMEs when the option is `renderer`.
+  - `name` is optional on a collection and defaults to its key in `collections`, matching what the resolver has always done.
+  - Dynamic `import('./schema.ts')` in a config is now tracked as a dependency, so editing that file reloads the config in dev.
+  - Fixed the renderer and image option names in the `@contentmap/markdown`, `@contentmap/unified` and `@contentmap/image` READMEs, and in the codemod's hint.
+
 ## 0.1.1
 
 ### Patch Changes

@@ -20,7 +20,7 @@ import { markdown } from '@contentmap/markdown'
 import { z } from 'zod'
 
 export default defineConfig({
-  renderers: [markdown()],
+  renderer: markdown(),
   collections: {
     posts: defineCollection({
       directory: 'content/posts',
