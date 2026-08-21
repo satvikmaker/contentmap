@@ -337,7 +337,13 @@ export default defineConfig({ collections: { posts, notes } })
         const index = await readFile(join(fixture.dir, '.contentmap/notes/index.js'), 'utf8')
         expect(index).toContain('"n1"')
       })
-      expect(handle.paths.some(p => p.endsWith('notes'))).toBe(true)
+      // Also asynchronous, and settles slightly later than the file above: the
+      // watcher's path set is refreshed by sync() after emit, so the index can
+      // be on disk while `paths` is still the pre-reload list. Asserting it
+      // synchronously passed on Linux and raced on Windows.
+      await until(() => {
+        expect(handle.paths.some(p => p.endsWith('notes'))).toBe(true)
+      })
 
       // The new directory must now be live.
       await fixture.write('notes/n2.md', '---\ntitle: Second note\n---\nx')
