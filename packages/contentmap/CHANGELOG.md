@@ -1,5 +1,11 @@
 # contentmap
 
+## 0.4.1
+
+### Patch Changes
+
+- Fixes the MDX compiler's `baseUrl` on Windows. It was built by hand-encoding the path, which turns a drive letter into `C%3A` and leaves relative imports inside an MDX document resolving against a base URL the platform does not recognise. Uses `node:url`'s `pathToFileURL` instead.
+
 ## 0.4.0
 
 ### Minor Changes

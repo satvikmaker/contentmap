@@ -1193,6 +1193,7 @@ export class Builder {
     rewrite: (html: string) => Promise<string>
   } {
     const config = this.#config!
+    const mdxCompiler = config.mdx
     const ownerId = `${collection.name}\u0000${documentMeta.id}`
 
     const register = async (url: string) => {
@@ -1262,11 +1263,13 @@ export class Builder {
       resolveImage: measure,
       // Undefined when no compiler is configured, which is what makes ctx.mdx()
       // reject with a hint rather than silently return nothing.
-      ...(config.mdx === undefined
+      // Captured, so the callback needs no non-null assertion to restate what
+      // the guard above already established.
+      ...(mdxCompiler === undefined
         ? {}
         : {
             compileMdx: (input: RenderInput, options?: unknown) =>
-              config.mdx!.compile(input, options)
+              mdxCompiler.compile(input, options)
           }),
       rewrite: async html => {
         const result = await rewriteHtml(html, {

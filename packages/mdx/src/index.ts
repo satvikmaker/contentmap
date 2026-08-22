@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url'
 import { compile } from '@mdx-js/mdx'
 import type { MdxCompiler, RenderInput } from 'contentmap'
 
@@ -48,7 +49,11 @@ export function mdx(options: MdxOptions = {}): MdxCompiler {
         {
           outputFormat: 'function-body',
           // Required from MDX v3 whenever the output is a function body.
-          baseUrl: pathToFileUrl(input.path),
+          // node:url rather than hand-rolling it: a Windows drive letter has to
+          // stay `C:` and not become `C%3A`, or relative imports inside the MDX
+          // resolve against a base URL the platform does not recognise. This
+          // only ever runs in a build, so the builtin costs nothing.
+          baseUrl: pathToFileURL(input.path).href,
           development: merged.development ?? false,
           ...(merged.remarkPlugins ? { remarkPlugins: merged.remarkPlugins as never } : {}),
           ...(merged.rehypePlugins ? { rehypePlugins: merged.rehypePlugins as never } : {}),
@@ -58,18 +63,6 @@ export function mdx(options: MdxOptions = {}): MdxCompiler {
       return String(file)
     }
   }
-}
-
-/**
- * `file://` URL for an absolute path.
- *
- * Hand-rolled rather than `node:url`, so this package stays importable from a
- * browser-targeted config without pulling a node builtin into the graph.
- */
-function pathToFileUrl(path: string): string {
-  const normalised = path.replace(/\\/g, '/')
-  const prefixed = normalised.startsWith('/') ? normalised : `/${normalised}`
-  return `file://${prefixed.split('/').map(encodeURIComponent).join('/')}`
 }
 
 export default mdx

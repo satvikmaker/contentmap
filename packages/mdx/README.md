@@ -60,6 +60,8 @@ Measured from a packed tarball:
 
 The MDX toolchain is most of a unified pipeline, and there is no version of it that is small. That is exactly why it is a separate package: a project rendering `.md` never installs any of it, and contentmap's own figures do not move.
 
+**None of that reaches your users.** The compiler runs at build time. `import { run } from '@mdx-js/mdx'` in client code tree-shakes to **0.2 KB minified and gzipped** — measured by bundling exactly that import — because `run` is a few lines around `AsyncFunction` and pulls none of the compiler with it.
+
 ## Options
 
 ```ts
