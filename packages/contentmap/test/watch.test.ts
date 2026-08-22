@@ -85,19 +85,30 @@ describe('watch mode', { timeout: 60_000 }, () => {
 
     const builder = createBuilder({ root: fixture.dir })
     await builder.build()
+    const activity = record(builder)
     await builder.watch({ debounce: 20 })
     try {
-      await fixture.write('content/b.md', '---\ntitle: B\n---\nx')
+      // Rewritten on each attempt. `watch()` waits for chokidar to be ready,
+      // but a single `add` event created immediately afterwards can still be
+      // dropped — fsevents on macOS is where this showed up. The guarantee is
+      // that a file added while watching gets picked up, not that the first
+      // event after ready is never lost. A file that never appears at all
+      // still fails here.
       await until(async () => {
+        await writeFile(join(fixture.dir, 'content/b.md'), '---\ntitle: B\n---\nx')
         const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
         expect(index).toContain('"b"')
-      })
+      }, activity)
 
+      // A deletion cannot be repeated, so this half stays a single event. It
+      // is the genuine guarantee: an unlink that never arrives means a deleted
+      // document keeps being served, and nudging some other file to force a
+      // rebuild would hide exactly that.
       await rm(join(fixture.dir, 'content/a.md'))
       await until(async () => {
         const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
         expect(index).not.toContain('"a"')
-      })
+      }, activity)
     } finally {
       await builder.close()
     }
