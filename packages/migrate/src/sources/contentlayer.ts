@@ -60,13 +60,14 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
     const contentType = stringOf(prop(object, 'contentType')) ?? 'markdown'
     if (contentType === 'mdx') {
       notes.push({
-        kind: 'unsupported',
+        kind: 'manual',
         collection: key,
         subject: "contentType: 'mdx'",
-        message: 'contentmap does not compile MDX',
+        message: 'MDX compiles through @contentmap/mdx',
         hint:
-          'The body is still available as `content`. Compile it in your app, or keep this ' +
-          'collection on its current tool until MDX lands.'
+          'Install @contentmap/mdx, set `mdx: mdx()` on the config, and add ' +
+          '`code: await ctx.mdx()` to transform. contentlayer put the same string on ' +
+          '`body.code`, and it is rendered the same way — with `run()` and your JSX runtime.'
       })
     }
     if (contentType !== 'data') {
@@ -93,7 +94,10 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
   }
 
   for (const [key, message] of [
-    ['mdx', 'MDX options are not carried over — contentmap does not compile MDX'],
+    [
+      'mdx',
+      'MDX options move to `mdx()` from @contentmap/mdx — remark and rehype plugins are accepted there'
+    ],
     ['markdown', 'markdown options move to the renderer you register'],
     ['onSuccess', 'no build completion hook'],
     ['onExtraFieldData', 'contentmap reports unknown fields via onUnknownField instead'],

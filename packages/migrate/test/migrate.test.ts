@@ -125,6 +125,31 @@ describe('contentlayer2', () => {
   })
 })
 
+describe('mdx is no longer a dead end', () => {
+  it('points a contentlayer mdx collection at @contentmap/mdx', () => {
+    // This used to say "keep this collection on its current tool", which for
+    // an unmaintained tool is not advice anyone can act on.
+    const result = migrate(
+      CONTENTLAYER.replace("contentType: 'markdown'", "contentType: 'mdx'"),
+      'contentlayer2'
+    )
+
+    const note = result.notes.find(n => n.subject.includes('mdx'))
+    expect(note?.kind).not.toBe('unsupported')
+    expect(note?.hint).toContain('@contentmap/mdx')
+    expect(note?.hint).toContain('ctx.mdx()')
+    expect(result.install).toContain('@contentmap/mdx')
+  })
+
+  it('points a velite s.mdx() field at the same place', () => {
+    const result = migrate(VELITE.replace('s.markdown()', 's.mdx()'), 'velite')
+
+    const note = result.notes.find(n => n.subject.includes('mdx'))
+    expect(note?.kind).toBe('manual')
+    expect(result.install).toContain('@contentmap/mdx')
+  })
+})
+
 describe('velite', () => {
   const result = migrate(VELITE, 'velite')
 

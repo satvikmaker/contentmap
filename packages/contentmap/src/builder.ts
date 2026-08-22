@@ -78,22 +78,24 @@ export class UnknownCollectionError extends Error {
 
 import type { ContextServices } from './render/context.ts'
 import type {
-  BuildOptions,
-  RefreshOptions,
   AnyDocument,
-  CollectionRef,
+  BuildOptions,
+  BuildResult,
   BuilderEvent,
   BuilderOptions,
-  BuildResult,
   CollectionDefinition,
+  CollectionRef,
   Diagnostic,
   DocumentMeta,
   Image,
   Logger,
+  Promisable,
+  RefreshOptions,
+  RenderInput,
+  ResolvedCollection,
   ResolvedConfig,
   Severity,
-  StoreEntry,
-  ResolvedCollection
+  StoreEntry
 } from './types.ts'
 
 type Listener = (event: BuilderEvent) => void
@@ -1187,6 +1189,7 @@ export class Builder {
       url: string
     ) => Promise<{ src: string; sourcePath: string; size: number } | undefined>
     resolveImage: (url: string) => Promise<Image | undefined>
+    compileMdx?: (input: RenderInput, options?: unknown) => Promisable<string>
     rewrite: (html: string) => Promise<string>
   } {
     const config = this.#config!
@@ -1257,6 +1260,14 @@ export class Builder {
           : undefined
       },
       resolveImage: measure,
+      // Undefined when no compiler is configured, which is what makes ctx.mdx()
+      // reject with a hint rather than silently return nothing.
+      ...(config.mdx === undefined
+        ? {}
+        : {
+            compileMdx: (input: RenderInput, options?: unknown) =>
+              config.mdx!.compile(input, options)
+          }),
       rewrite: async html => {
         const result = await rewriteHtml(html, {
           resolve: async (url): Promise<ResolvedAsset | undefined> => {

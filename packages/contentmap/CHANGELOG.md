@@ -1,5 +1,17 @@
 # contentmap
 
+## 0.4.0
+
+### Minor Changes
+
+- Adds `@contentmap/mdx`, so MDX compiles rather than being a dead end.
+
+  `ctx.mdx()` returns a JavaScript function body — the same string contentlayer's `body.code` and velite's `s.mdx()` produce — which `run()` from `@mdx-js/mdx` turns into a component with your own JSX runtime. JSX, component imports and value exports all survive.
+
+  The compiler is a new extension point (`MdxCompiler`) rather than a `Renderer`, because MDX does not produce HTML. Core gains an interface and a memoised `ctx.mdx()`; the toolchain itself stays in its own package, where a project rendering plain markdown never installs it.
+
+  `@contentmap/migrate` now points contentlayer and velite MDX collections at it instead of reporting them unsupported.
+
 ## 0.3.1
 
 ### Patch Changes

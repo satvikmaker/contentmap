@@ -39,11 +39,11 @@ const HELPERS: Record<string, Helper> = {
       'Register a renderer: `renderer: markdown()` from @contentmap/markdown.'
   },
   mdx: {
-    kind: 'unsupported',
-    message: 'contentmap does not compile MDX',
+    kind: 'manual',
+    message: 'MDX compiles through @contentmap/mdx',
     hint:
-      'Keep the source in a `content` field and compile it in your app, or stay on velite for ' +
-      'this collection until MDX lands.'
+      'Install @contentmap/mdx, set `mdx: mdx()` on the config, and add ' +
+      '`code: await ctx.mdx()` to transform. velite produced the same function-body string.'
   },
   image: {
     // The frontmatter value is a path string; only the processing moves.
@@ -149,7 +149,7 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
 
   for (const [key, message] of [
     ['markdown', 'markdown options move to the renderer you register'],
-    ['mdx', 'contentmap does not compile MDX'],
+    ['mdx', 'MDX options move to `mdx()` from @contentmap/mdx'],
     ['prepare', 'no global prepare hook'],
     ['complete', 'no global complete hook'],
     ['loaders', 'contentmap calls these parsers; register them with defineParser']

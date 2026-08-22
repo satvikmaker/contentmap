@@ -1,6 +1,6 @@
 {
   "name": "contentmap",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "The type-safe content layer for every framework.",
   "type": "module",
   "license": "MIT",

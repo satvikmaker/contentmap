@@ -99,6 +99,21 @@ export interface ImagePlaceholder {
  * and split out of core because measuring costs a dependency most projects that
  * only ship prose do not need.
  */
+/**
+ * Compiles MDX to JavaScript.
+ *
+ * Separate from `Renderer` because MDX does not produce HTML. It produces a
+ * component, which only exists once a JSX runtime has evaluated it — so what a
+ * build can emit is the code, not the result. Kept out of core: @mdx-js/mdx
+ * brings a unified stack that a project rendering plain markdown should never
+ * pay for.
+ */
+export interface MdxCompiler {
+  name: string
+  /** JavaScript function body, per @mdx-js/mdx `outputFormat: 'function-body'`. */
+  compile(input: RenderInput, options?: unknown): Promisable<string>
+}
+
 export interface ImageProcessor {
   name: string
   measure(buffer: Uint8Array, path: string): Promisable<ImageMeasurement | undefined>
@@ -184,6 +199,13 @@ export interface TransformContext {
   body: string
   /** Rendered HTML, via the configured renderer. Memoised per document. */
   markdown(options?: MarkdownRenderOptions): Promise<string>
+  /**
+   * MDX compiled to a JavaScript function body. Memoised per document.
+   *
+   * A string, because that is what a build can put in a data module. Evaluate
+   * it with `run()` from `@mdx-js/mdx` and your framework's JSX runtime.
+   */
+  mdx(options?: unknown): Promise<string>
   /** Copy a file referenced relative to this document; returns its public URL. */
   asset(path: string): Promise<string>
   /** Copy an image and measure it. */
@@ -422,6 +444,8 @@ export interface UserConfig {
   renderer?: Renderer
   /** Image measurement. Without one, `ctx.image()` is a build error. */
   images?: ImageProcessor
+  /** MDX compiler, from `@contentmap/mdx`. Powers `ctx.mdx()`. */
+  mdx?: MdxCompiler
   /** Extensions treated as copyable assets. Defaults to a broad allowlist. */
   assetExtensions?: readonly string[]
   concurrency?: number
@@ -463,6 +487,7 @@ export interface ResolvedConfig {
   parsers: readonly Parser[]
   renderer: Renderer | undefined
   images: ImageProcessor | undefined
+  mdx: MdxCompiler | undefined
   assetExtensions: readonly string[]
   concurrency: number
   readConcurrency: number

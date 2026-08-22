@@ -45,6 +45,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 ### Content features
 
 - [x] Renderers as opt-in packages: `@contentmap/markdown` (marked) and `@contentmap/unified` (remark/rehype)
+- [x] MDX via `@contentmap/mdx` — JSX, component imports and value exports, compiled to a function body
 - [x] `ctx.markdown()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`
 - [x] Images: build-time dimensions, thumbhash placeholders, `sharp` optional
 - [x] Assets: content-hashed copying, URL rewriting in rendered HTML, path-escape containment
@@ -96,7 +97,6 @@ The near-term list. These are the things most likely to change someone's mind ab
 
 ### Content
 
-- [ ] **MDX compilation** — the single most requested capability contentmap does not have. Frontmatter in `.mdx` already works; compiling to components does not
 - [ ] **`@contentmap/shiki`** — syntax highlighting as a first-class renderer plugin, with themes and per-block languages
 - [ ] **Search index generation** — emit an index consumable by Pagefind, Orama or MiniSearch without shipping the corpus
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update

@@ -36,6 +36,7 @@ export function migrate(source: string, tool: SourceTool, fileName?: string): Mi
   if (plan.notes.some(n => n.hint?.includes('@contentmap/markdown'))) {
     install.push('@contentmap/markdown')
   }
+  if (plan.notes.some(n => n.hint?.includes('@contentmap/mdx'))) install.push('@contentmap/mdx')
 
   return {
     tool,

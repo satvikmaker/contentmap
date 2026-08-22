@@ -129,6 +129,7 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     parsers: user.parsers ?? [],
     renderer: user.renderer,
     images: user.images,
+    mdx: user.mdx,
     assetExtensions: (user.assetExtensions ?? DEFAULT_ASSET_EXTENSIONS).map(e =>
       e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`
     ),

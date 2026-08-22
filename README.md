@@ -102,8 +102,9 @@ const full = await posts.load('hello-world') // loads ONE document's body
 |                       |                                                                                                                                                                    |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Any validator**     | zod, valibot, arktype, effect — anything implementing [Standard Schema](https://standardschema.dev). All four are tested for parity                                |
-| **Any source**        | Markdown/MDX frontmatter, YAML, JSON, JSONC, TOML, raw text, plus HTTP APIs and custom sources via `defineLoader` / `defineParser`                                 |
+| **Any source**        | Markdown, MDX, YAML, JSON, JSONC, TOML, raw text, plus HTTP APIs and custom sources via `defineLoader` / `defineParser`                                            |
 | **Typed projections** | `select()` narrows the row type; `where`, `sortBy` and `groupBy` still reach the whole index                                                                       |
+| **MDX**               | JSX in your content, components imported into it, values exported from it — via `@contentmap/mdx`                                                                  |
 | **Images**            | Dimensions read at build time so pages stop jumping, plus [thumbhash](https://evanw.github.io/thumbhash/) placeholders — a 21-byte payload, zero client JavaScript |
 | **Assets**            | Content-hashed copying, URL rewriting in rendered HTML, orphan cleanup driven by a manifest                                                                        |
 | **References**        | Cross-collection lookups with cycle detection, resolved on demand                                                                                                  |
@@ -165,7 +166,7 @@ A build-time content layer: it reads content files, validates them against a sch
 Yes. Contentlayer is unmaintained — it died when its sponsor withdrew, and a volunteer maintainer offer was closed by a stale bot. contentmap installs 19× smaller, works on Turbopack, and `npx @contentmap/migrate` converts your config.
 
 **Does contentmap support MDX?**
-Frontmatter in `.mdx` files, yes. Compiling MDX to components, not yet — compile it in your app.
+Yes. `npm i @contentmap/mdx`, set `mdx: mdx()` and call `await ctx.mdx()` in a transform. It compiles to the same function-body string contentlayer and velite produce, so rendering code ports across unchanged.
 
 **Do I have to use Zod?**
 No. Any Standard Schema validator works: valibot, arktype and effect are all tested.
@@ -191,11 +192,11 @@ Shipped in 0.1 — see [ROADMAP.md](ROADMAP.md) for the detail.
 - [x] Remote sources with digest revalidation, offline `--frozen` builds
 - [x] Watch mode, diagnostics with code frames, `--json` for CI
 - [x] Five framework adapters, each proven against its real toolchain in CI
+- [x] MDX via `@contentmap/mdx` — JSX, imports and exports in your content
 - [x] `@contentmap/migrate` for contentlayer2, velite and content-collections
 
 Coming next:
 
-- [ ] MDX compilation
 - [ ] `@contentmap/shiki` syntax highlighting
 - [ ] Search index generation for Pagefind, Orama and MiniSearch
 - [ ] `@contentmap/git` — dates and authors from history

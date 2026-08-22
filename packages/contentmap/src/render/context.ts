@@ -3,12 +3,14 @@ import type {
   CollectionRef,
   DocumentMeta,
   ExcerptOptions,
-  Image,
-  MarkdownRenderOptions,
   Heading,
+  Image,
   Logger,
+  MarkdownRenderOptions,
+  Promisable,
   ReadingTime,
   ReadingTimeOptions,
+  RenderInput,
   Renderer,
   SkipSignal,
   TocEntry,
@@ -32,6 +34,15 @@ export class MissingRendererError extends Error {
     super(`No renderer configured, but ${what} was called`)
     this.hint =
       'Install a renderer and set it in your config: `import markdown from "@contentmap/markdown"` then `renderer: markdown()`.'
+  }
+}
+
+export class MissingMdxCompilerError extends Error {
+  override readonly name = 'MissingMdxCompilerError'
+  readonly hint =
+    'Install @contentmap/mdx and set it in your config: `import { mdx } from "@contentmap/mdx"` then `mdx: mdx()`.'
+  constructor() {
+    super('No MDX compiler configured, but ctx.mdx() was called')
   }
 }
 
@@ -74,6 +85,8 @@ export interface ContextInput {
   /** Copies a relative reference. Undefined disables asset handling entirely. */
   resolveAsset?: AssetResolver
   resolveImage?: ImageResolver
+  /** Compiles the body to a JavaScript function body. Undefined disables ctx.mdx(). */
+  compileMdx?: (input: RenderInput, options?: unknown) => Promisable<string>
   /** Rewrites relative URLs in rendered HTML. */
   rewrite?: (html: string) => Promise<string>
 }
@@ -108,6 +121,7 @@ export function createTransformContext(input: ContextInput): TransformContext {
   let rawPromise: Promise<string> | undefined
   let htmlPromise: Promise<string> | undefined
   let plainPromise: Promise<string> | undefined
+  let mdxPromise: Promise<string> | undefined
   let headingsPromise: Promise<readonly Heading[]> | undefined
 
   const renderRaw = (rendererOptions?: unknown): Promise<string> => {
@@ -159,6 +173,14 @@ export function createTransformContext(input: ContextInput): TransformContext {
     body,
     logger,
     markdown,
+    mdx(options?: unknown): Promise<string> {
+      if (!input.compileMdx) return Promise.reject(new MissingMdxCompilerError())
+      // Options bypass the memo, as `markdown()` does: a caller asking for
+      // different output should get it rather than the first call's result.
+      if (options !== undefined) return Promise.resolve(input.compileMdx(renderInput, options))
+      mdxPromise ??= Promise.resolve(input.compileMdx(renderInput))
+      return mdxPromise
+    },
     plain,
     async excerpt(options: ExcerptOptions = {}): Promise<string> {
       const separator = options.separator ?? DEFAULT_EXCERPT_SEPARATOR

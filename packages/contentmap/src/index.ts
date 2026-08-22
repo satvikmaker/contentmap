@@ -54,7 +54,7 @@ export {
   rewriteHtml,
   splitUrl
 } from './assets/index.ts'
-export { MissingImageProcessorError } from './render/context.ts'
+export { MissingImageProcessorError, MissingMdxCompilerError } from './render/context.ts'
 
 export type { AnyDocument } from './types.ts'
 export type { InferDoc, InferIndex, InferSchema } from './infer.ts'
@@ -78,6 +78,7 @@ export type {
   ImageMeasurement,
   ImagePlaceholder,
   ImageProcessor,
+  MdxCompiler,
   MarkdownRenderOptions,
   ExcerptOptions,
   Heading,
