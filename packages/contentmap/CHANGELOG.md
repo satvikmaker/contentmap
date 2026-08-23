@@ -1,5 +1,11 @@
 # contentmap
 
+## 0.5.1
+
+### Patch Changes
+
+- Corrects the cost breakdown in the `@contentmap/shiki` README. It claimed the install was "nearly all grammars and themes"; measuring shows data is 59% of the size but only 3 of 45 packages — the rest is the hast/unist HTML-tree machinery and the Oniguruma-to-RegExp translator.
+
 ## 0.5.0
 
 ### Minor Changes

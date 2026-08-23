@@ -83,9 +83,22 @@ Pass [`@shikijs/rehype`](https://shiki.style/packages/rehype) in `rehypePlugins`
 | `contentmap` + zod  | 10       | 7.0 MB       |
 | `@contentmap/shiki` | 46       | 25 MB        |
 
-Most of that is grammars and themes — every language VS Code supports, as data. It is a build-time cost only: the browser receives HTML that is already coloured, and none of Shiki ships to it.
+Where it goes, measured:
 
-That is why it is a separate package. A project that does not highlight code installs none of it, and contentmap's own figures do not move.
+|                                 | size  | packages |
+| ------------------------------- | ----- | -------- |
+| `@shikijs/langs` — 722 grammars | 11 MB | 1        |
+| `@shikijs/themes` — 132 themes  | 2 MB  | 1        |
+| `shiki` core                    | 4 MB  | 1        |
+| everything else                 | 6 MB  | 41       |
+
+So the size is mostly data, but the _package count_ is mostly machinery: about twenty `hast`/`unist`/`micromark` utilities that build and serialise the HTML tree, and the `oniguruma-to-es` family, which translates the Oniguruma regex syntax TextMate grammars are written in into native `RegExp`.
+
+It is not avoidable by configuring less. `@shikijs/langs` is a single package holding every grammar, so narrowing `langs` narrows what is _parsed and held in memory_, not what is installed.
+
+**None of it reaches your users.** A page rendering contentmap output bundles 0.15 KB gzipped and contains no trace of Shiki — measured — because the colouring already happened. The usual alternative ships a highlighter to every visitor and runs it after paint.
+
+That is also why it is a separate package: a project that does not highlight code installs none of this, and contentmap's own figures do not move.
 
 ## Links
 
