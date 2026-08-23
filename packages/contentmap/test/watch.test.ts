@@ -410,8 +410,15 @@ export default defineConfig({ collections: { posts } })
       const handle = await builder.watch({ debounce: 20 })
       expect(handle.paths.some(p => p.endsWith('extra.txt'))).toBe(true)
 
-      await writeFile(join(fixture.dir, 'data/extra.txt'), 'two')
+      // Rewritten on each attempt, like the other watch assertions.
+      // `watcher.add()` returns before the OS watch is live, so a single write
+      // immediately afterwards can go unseen — the recorder showed the initial
+      // build and then nothing at all for thirty seconds on macOS. The
+      // guarantee is that a change to a watched file rebuilds, not that the
+      // first write after registering it wins the race. A file that was never
+      // watched still fails here.
       await until(async () => {
+        await writeFile(join(fixture.dir, 'data/extra.txt'), 'two')
         const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
         expect(doc).toContain('"two"')
       }, activity)
