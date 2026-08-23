@@ -99,20 +99,21 @@ const full = await posts.load('hello-world') // loads ONE document's body
 
 ## Features
 
-|                       |                                                                                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Any validator**     | zod, valibot, arktype, effect — anything implementing [Standard Schema](https://standardschema.dev). All four are tested for parity                                |
-| **Any source**        | Markdown, MDX, YAML, JSON, JSONC, TOML, raw text, plus HTTP APIs and custom sources via `defineLoader` / `defineParser`                                            |
-| **Typed projections** | `select()` narrows the row type; `where`, `sortBy` and `groupBy` still reach the whole index                                                                       |
-| **MDX**               | JSX in your content, components imported into it, values exported from it — via `@contentmap/mdx`                                                                  |
-| **Images**            | Dimensions read at build time so pages stop jumping, plus [thumbhash](https://evanw.github.io/thumbhash/) placeholders — a 21-byte payload, zero client JavaScript |
-| **Assets**            | Content-hashed copying, URL rewriting in rendered HTML, orphan cleanup driven by a manifest                                                                        |
-| **References**        | Cross-collection lookups with cycle detection, resolved on demand                                                                                                  |
-| **Remote content**    | Digest-keyed revalidation, `--frozen` for offline CI, and credentials screened out of the cache                                                                    |
-| **Incremental**       | Persistent transform cache keyed by content digest — never by mtime alone                                                                                          |
-| **Watch mode**        | Debounced, coalesced, single in-flight build; a broken config keeps the last good output                                                                           |
-| **Diagnostics**       | Grouped by kind with code frames, did-you-mean hints, and `--json` for CI                                                                                          |
-| **Type safety**       | `isolatedDeclarations`, unserializable values rejected at compile time, `InferDoc` / `InferIndex` helpers                                                          |
+|                         |                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Any validator**       | zod, valibot, arktype, effect — anything implementing [Standard Schema](https://standardschema.dev). All four are tested for parity                                |
+| **Any source**          | Markdown, MDX, YAML, JSON, JSONC, TOML, raw text, plus HTTP APIs and custom sources via `defineLoader` / `defineParser`                                            |
+| **Typed projections**   | `select()` narrows the row type; `where`, `sortBy` and `groupBy` still reach the whole index                                                                       |
+| **MDX**                 | JSX in your content, components imported into it, values exported from it — via `@contentmap/mdx`                                                                  |
+| **Syntax highlighting** | VS Code grammars and themes at build time, light/dark aware — via `@contentmap/shiki`                                                                              |
+| **Images**              | Dimensions read at build time so pages stop jumping, plus [thumbhash](https://evanw.github.io/thumbhash/) placeholders — a 21-byte payload, zero client JavaScript |
+| **Assets**              | Content-hashed copying, URL rewriting in rendered HTML, orphan cleanup driven by a manifest                                                                        |
+| **References**          | Cross-collection lookups with cycle detection, resolved on demand                                                                                                  |
+| **Remote content**      | Digest-keyed revalidation, `--frozen` for offline CI, and credentials screened out of the cache                                                                    |
+| **Incremental**         | Persistent transform cache keyed by content digest — never by mtime alone                                                                                          |
+| **Watch mode**          | Debounced, coalesced, single in-flight build; a broken config keeps the last good output                                                                           |
+| **Diagnostics**         | Grouped by kind with code frames, did-you-mean hints, and `--json` for CI                                                                                          |
+| **Type safety**         | `isolatedDeclarations`, unserializable values rejected at compile time, `InferDoc` / `InferIndex` helpers                                                          |
 
 ### Transform context
 
@@ -193,11 +194,11 @@ Shipped in 0.1 — see [ROADMAP.md](ROADMAP.md) for the detail.
 - [x] Watch mode, diagnostics with code frames, `--json` for CI
 - [x] Five framework adapters, each proven against its real toolchain in CI
 - [x] MDX via `@contentmap/mdx` — JSX, imports and exports in your content
+- [x] Syntax highlighting via `@contentmap/shiki`
 - [x] `@contentmap/migrate` for contentlayer2, velite and content-collections
 
 Coming next:
 
-- [ ] `@contentmap/shiki` syntax highlighting
 - [ ] Search index generation for Pagefind, Orama and MiniSearch
 - [ ] `@contentmap/git` — dates and authors from history
 - [ ] `$schema` autocomplete for frontmatter in your editor

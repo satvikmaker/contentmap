@@ -1,5 +1,15 @@
 # contentmap
 
+## 0.5.0
+
+### Minor Changes
+
+- Adds `@contentmap/shiki`, syntax highlighting built on Shiki.
+
+  Highlighting runs at build time using the same TextMate grammars and themes VS Code uses, so the browser receives coloured HTML and no highlighter. It is a marked extension, passed through the default renderer's existing `extensions` option, so neither package needs to know about the other.
+
+  Supports a single theme or a light/dark pair — the pair emits CSS variables, so a page can switch without re-highlighting. A fence in a language that was not loaded renders as plain text rather than failing the build.
+
 ## 0.4.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/nuxt",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Nuxt module for contentmap.",
   "type": "module",
   "license": "MIT",

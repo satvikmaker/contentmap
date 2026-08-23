@@ -1,0 +1,8 @@
+# @contentmap/shiki
+
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies
+  - contentmap@0.5.0

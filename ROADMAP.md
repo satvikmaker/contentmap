@@ -46,6 +46,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 
 - [x] Renderers as opt-in packages: `@contentmap/markdown` (marked) and `@contentmap/unified` (remark/rehype)
 - [x] MDX via `@contentmap/mdx` — JSX, component imports and value exports, compiled to a function body
+- [x] Syntax highlighting via `@contentmap/shiki` — VS Code grammars, single or light/dark themes
 - [x] `ctx.markdown()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`
 - [x] Images: build-time dimensions, thumbhash placeholders, `sharp` optional
 - [x] Assets: content-hashed copying, URL rewriting in rendered HTML, path-escape containment
@@ -97,7 +98,6 @@ The near-term list. These are the things most likely to change someone's mind ab
 
 ### Content
 
-- [ ] **`@contentmap/shiki`** — syntax highlighting as a first-class renderer plugin, with themes and per-block languages
 - [ ] **Search index generation** — emit an index consumable by Pagefind, Orama or MiniSearch without shipping the corpus
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update
 - [ ] **Draft and preview modes** — a first-class way to include drafts in dev and exclude them in production
