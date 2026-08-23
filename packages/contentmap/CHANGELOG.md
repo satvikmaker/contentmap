@@ -1,5 +1,11 @@
 # contentmap
 
+## 0.5.2
+
+### Patch Changes
+
+- Fixes two problems in `@contentmap/shiki`. A `defaultLanguage` that was not loaded crashed the build from inside Shiki against whichever document happened to have a bare fence; it is now rejected when the config loads, naming the fix. And fence metadata — `{1,3}`, `twoslash` — was discarded rather than passed to transformers, which made the `transformers` option far less useful than it looked. Metadata attached without a space, as VitePress writes it, is now read too.
+
 ## 0.5.1
 
 ### Patch Changes

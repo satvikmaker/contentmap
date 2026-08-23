@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/image",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Image dimensions and thumbhash placeholders for contentmap.",
   "type": "module",
   "license": "MIT",

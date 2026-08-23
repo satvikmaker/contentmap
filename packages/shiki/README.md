@@ -65,12 +65,27 @@ Every language is a grammar that has to be parsed and held in memory, so this is
 
 ## Options
 
-|                   |                                                                     |
-| ----------------- | ------------------------------------------------------------------- |
-| `theme`           | A [bundled theme](https://shiki.style/themes), or `{ light, dark }` |
-| `langs`           | [Languages](https://shiki.style/languages) to load                  |
-| `transformers`    | Shiki transformers, e.g. from `@shikijs/transformers`               |
-| `defaultLanguage` | Language for a fence that declares none. Default `'text'`           |
+|                   |                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `theme`           | A [bundled theme](https://shiki.style/themes), or `{ light, dark }`                      |
+| `langs`           | [Languages](https://shiki.style/languages) to load                                       |
+| `transformers`    | Shiki transformers, e.g. from `@shikijs/transformers`                                    |
+| `defaultLanguage` | Language for a fence that declares none. Default `'text'`, and it must be one you loaded |
+
+## Fence metadata
+
+Anything after the language reaches your transformers, so line highlighting and the rest work as they do elsewhere:
+
+`````md
+````ts {1,3}
+```ts{1,3}
+```ts twoslash
+````
+`````
+
+```
+
+All three forms are read — the brace-attached one because VitePress and others write it that way.
 
 ## Using @contentmap/unified?
 
@@ -106,3 +121,4 @@ That is also why it is a separate package: a project that does not highlight cod
 - [Report an issue](https://github.com/satvikmaker/contentmap/issues)
 
 MIT
+```

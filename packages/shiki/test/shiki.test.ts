@@ -80,6 +80,63 @@ describe('shiki highlighting', () => {
     expect(html).not.toContain('class="shiki')
   })
 
+  it('rejects a defaultLanguage it did not load, at config time', async () => {
+    // Shiki throws "Language `x` not found" from inside codeToHtml, which
+    // surfaces mid-build against whichever document happened to have a bare
+    // fence. A fallback whose whole purpose is to never fail has to be checked
+    // when the config loads, not when a document trips over it.
+    await expect(shiki({ langs: ['typescript'], defaultLanguage: 'python' })).rejects.toThrow(
+      /defaultLanguage "python" is not loaded/
+    )
+  })
+
+  it('passes fence metadata to transformers', async () => {
+    // Line highlighting, diff markers and twoslash all read this. Dropping it
+    // made `transformers` far less useful than it looked.
+    let seen: unknown
+    const spy = {
+      name: 'spy',
+      preprocess(_code: string, options: { meta?: unknown }) {
+        seen = options.meta
+      }
+    }
+
+    await render('```ts {1,3}\nconst a = 1\n```', { transformers: [spy as never] })
+
+    expect(seen).toEqual({ __raw: '{1,3}' })
+  })
+
+  it('reads metadata attached without a space', async () => {
+    // VitePress and others write ```js{1,3}. Treating that as a language name
+    // loses the highlighting silently. No language name contains a brace.
+    let seen: unknown
+    const spy = {
+      name: 'spy',
+      preprocess(_code: string, options: { meta?: unknown }) {
+        seen = options.meta
+      }
+    }
+
+    const html = await render('```ts{1,3}\nconst a = 1\n```', { transformers: [spy as never] })
+
+    expect(seen).toEqual({ __raw: '{1,3}' })
+    expect(html).toMatch(/<span style="color:#[0-9A-Fa-f]{6}">const/)
+  })
+
+  it('leaves a plain fence without metadata', async () => {
+    let seen: unknown = 'untouched'
+    const spy = {
+      name: 'spy',
+      preprocess(_code: string, options: { meta?: unknown }) {
+        seen = options.meta
+      }
+    }
+
+    await render('```ts\nconst a = 1\n```', { transformers: [spy as never] })
+
+    expect(seen).toBeUndefined()
+  })
+
   it('honours a language alias', async () => {
     // `js` and `javascript` are the same grammar, and people write both.
     const html = await render('```js\nconst a = 1\n```')
