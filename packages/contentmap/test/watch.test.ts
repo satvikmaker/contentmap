@@ -61,6 +61,59 @@ function record(builder: ReturnType<typeof createBuilder>): () => string {
 }
 
 describe('watch mode', { timeout: 60_000 }, () => {
+  fixtureTest('never runs two builds at once, even on a slow transform', async ({ fixture }) => {
+    // The burst test below cannot fail on its own: twenty writes land fast
+    // enough that any implementation coalesces them, and each build finishes
+    // before the next event arrives, so `peak` stays 1 even with the mutex
+    // removed. This one holds a build open long enough for more events to
+    // arrive during it, which is the only condition under which overlap is
+    // possible at all.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: async doc => {
+    await new Promise(r => setTimeout(r, 150))
+    return doc
+  }
+})
+export default defineConfig({ collections: { posts } })
+`
+    )
+    await fixture.write('content/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir })
+    await builder.build()
+    const activity = record(builder)
+
+    let inflight = 0
+    let peak = 0
+    builder.on(e => {
+      if (e.type === 'build:start') peak = Math.max(peak, ++inflight)
+      if (e.type === 'build:end') inflight--
+    })
+
+    await builder.watch({ debounce: 10 })
+    try {
+      // Spread across the 150ms transform, so later writes land while a build
+      // is genuinely in flight.
+      for (let i = 0; i < 6; i++) {
+        await writeFile(join(fixture.dir, 'content/a.md'), `---\ntitle: Edit ${i}\n---\nx`)
+        await new Promise(r => setTimeout(r, 40))
+      }
+      await until(async () => {
+        const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+        expect(doc).toContain('Edit 5')
+      }, activity)
+
+      expect(peak, 'two builds ran at once').toBe(1)
+    } finally {
+      await builder.close()
+    }
+  })
   fixtureTest('rebuilds when a file changes', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', CONFIG)
     await fixture.write('content/a.md', '---\ntitle: First\n---\nx')
@@ -142,9 +195,15 @@ describe('watch mode', { timeout: 60_000 }, () => {
 
     await builder.watch({ debounce: 30 })
     try {
-      for (let i = 0; i < 20; i++) {
-        await writeFile(join(fixture.dir, `content/p${i}.md`), `---\ntitle: Edited ${i}\n---\nx`)
-      }
+      // Issued together rather than awaited one at a time. Serial writes are
+      // only a burst on a machine fast enough to finish them inside one
+      // debounce window; on a loaded runner each write became its own window
+      // and the premise of the test quietly stopped holding.
+      await Promise.all(
+        Array.from({ length: 20 }, (_, i) =>
+          writeFile(join(fixture.dir, `content/p${i}.md`), `---\ntitle: Edited ${i}\n---\nx`)
+        )
+      )
       await until(async () => {
         const doc = await readFile(join(fixture.dir, '.contentmap/posts/p19.js'), 'utf8')
         expect(doc).toContain('Edited 19')
@@ -152,7 +211,11 @@ describe('watch mode', { timeout: 60_000 }, () => {
 
       expect(peak, 'builds must never overlap').toBe(1)
       const rebuilds = builds - baseline
-      expect(rebuilds, `20 writes produced ${rebuilds} rebuilds`).toBeLessThanOrEqual(3)
+      // Coalescing is the claim, not an exact count: the filesystem may still
+      // deliver the twenty events across a couple of windows. Anything near
+      // twenty would mean no coalescing at all, which is the regression worth
+      // catching — content-collections produced one build per write.
+      expect(rebuilds, `20 writes produced ${rebuilds} rebuilds`).toBeLessThanOrEqual(5)
     } finally {
       await builder.close()
     }

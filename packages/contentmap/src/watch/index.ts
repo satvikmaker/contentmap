@@ -162,6 +162,11 @@ export async function startWatch(
     if (closed) return
     const wanted = new Set([...collectWatchPaths(next), ...extra])
     for (const path of wanted) {
+      // `add` returns before the OS watch is live. On macOS especially, a file
+      // written inside that window is never reported, and there is no
+      // per-path ready signal to await — so what this offers is eventual, not
+      // immediate. Three tests asserted the immediate version and each
+      // surfaced as a platform-specific flake before that was understood.
       if (!current.has(path)) watcher.add(path)
     }
     for (const path of current) {
