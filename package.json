@@ -27,6 +27,8 @@
     "bench:bundle": "node scripts/bundle-size.mjs",
     "gate:fd": "./scripts/fd-limit-gate.sh",
     "verify:vite": "node --experimental-strip-types scripts/verify-vite.mjs",
+    "api:snapshot": "node scripts/api-snapshot.mjs",
+    "api:check": "node scripts/api-snapshot.mjs --check",
     "verify:types": "node scripts/verify-types.mjs",
     "verify:cli": "node scripts/verify-cli.mjs",
     "verify:docs": "node scripts/verify-docs.mjs",

@@ -64,6 +64,9 @@ jobs:
       # Our type tests import `../src`; a user imports the emitted `.d.ts`. Two
       # type bugs shipped through that gap and failed real `next build`s.
       - run: pnpm verify:types
+      # The public surface is committed under api/. A signature change that
+      # nobody intended is exactly what a stable release has to make visible.
+      - run: pnpm api:check
       # The error a user sees comes from the shipped binary, not from run()
       # imported into a test where the config loads through a different path.
       - run: pnpm verify:cli

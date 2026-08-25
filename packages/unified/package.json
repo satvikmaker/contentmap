@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/unified",
-  "version": "0.5.2",
+  "version": "1.0.0",
   "description": "remark/rehype renderer for contentmap, for the plugin ecosystem.",
   "type": "module",
   "license": "MIT",

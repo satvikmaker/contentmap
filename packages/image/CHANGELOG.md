@@ -1,5 +1,12 @@
 # @contentmap/image
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies
+  - contentmap@1.0.0
+
 ## 0.5.2
 
 ### Patch Changes

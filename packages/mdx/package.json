@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/mdx",
-  "version": "0.5.2",
+  "version": "1.0.0",
   "description": "MDX compiler for contentmap, built on @mdx-js/mdx.",
   "type": "module",
   "license": "MIT",

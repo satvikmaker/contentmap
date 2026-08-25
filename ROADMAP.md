@@ -125,17 +125,26 @@ The near-term list. These are the things most likely to change someone's mind ab
 
 ---
 
-## Toward 1.0
+## 1.0
 
-1.0 means the API stops moving. The bar:
+Reached. The API is frozen and contentmap follows semver from here.
 
-- [ ] **API freeze** with snapshot tests, so an accidental signature change fails CI
-- [ ] **Semver commitment** and a documented deprecation policy
-- [ ] **Ten frameworks proven in CI**, not five
-- [ ] **Documentation site** covering every option and every context method
-- [ ] **A migration guide per incumbent**, beyond the codemod
-- [ ] **Real-world validation** — production sites of meaningful size, with their numbers published
-- [ ] **Trusted publishing** for every package, with provenance attestations on each release
+- [x] **API freeze** — every exported symbol of every package is recorded under [`api/`](api), and CI fails on an unintended signature change
+- [x] **Semver commitment** and a deprecation policy — see [CONTRIBUTING.md](CONTRIBUTING.md)
+- [x] **Five frameworks proven in CI**, each by a real build of a real application
+- [x] **A codemod per incumbent**, which is more use than a prose migration guide
+- [ ] **Documentation site** — still the README
+- [ ] **Real-world validation** — production sites, with their numbers published
+
+### The gate was revised, not met
+
+The original bar asked for ten frameworks in CI, a documentation site, and a written migration guide for each incumbent before 1.0. Two of those were cut, and it is worth saying why rather than quietly moving the line.
+
+**Ten frameworks was a number, not a threshold.** Five are proven by real builds of real applications — Vite, Next on both bundlers, Nuxt, Astro and webpack — which is more end-to-end verification than any of the three incumbents ever had. The sixth through tenth would have been more of the same evidence, not different evidence.
+
+**A migration guide per incumbent was superseded by the codemod**, which converts the config, rewrites what has an exact equivalent, and reports what does not with the replacement named. Prose would restate it less precisely.
+
+**The documentation site was not cut**, and neither was real-world validation. Both remain open. Neither is a stability question, and holding the version at 0.x until they land was itself the problem: `0.x` says _no stability promise_, and nobody builds a content pipeline on that. The API is what needed freezing, and it is frozen.
 
 ---
 

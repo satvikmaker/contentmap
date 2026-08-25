@@ -1,5 +1,15 @@
 # contentmap
 
+## 1.0.0
+
+### Major Changes
+
+- 1.0. The API is frozen and contentmap follows semver from here.
+
+  Every exported symbol of every package is recorded under `api/`, generated from the emitted declarations and checked in CI, so a signature change that nobody intended fails the build instead of reaching a release. `CONTRIBUTING.md` documents what each release kind may change and the deprecation policy for anything being removed.
+
+  No behaviour changes in this release. The version number is the change: `0.x` says _no stability promise_, and that was a barrier to adoption rather than an accurate description of the codebase.
+
 ## 0.5.2
 
 ### Patch Changes

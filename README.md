@@ -183,6 +183,10 @@ Yes — CI runs Linux, macOS and Windows on Node 22 and 24.
 
 ---
 
+## Stability
+
+**1.0 — semver from here.** Every exported symbol of every package is recorded under [`api/`](api), and CI fails on a signature change that was not deliberate. Patch releases fix bugs, minors add options and packages without breaking existing code, and anything being removed is deprecated first with its replacement named. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Roadmap
 
 Shipped in 0.1 — see [ROADMAP.md](ROADMAP.md) for the detail.
