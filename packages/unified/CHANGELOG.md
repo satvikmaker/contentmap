@@ -1,5 +1,12 @@
 # @contentmap/unified
 
+## 1.0.1
+
+### Patch Changes
+
+- Updated dependencies
+  - contentmap@1.0.1
+
 ## 1.0.0
 
 ### Patch Changes
