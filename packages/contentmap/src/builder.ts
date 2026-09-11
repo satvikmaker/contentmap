@@ -1169,7 +1169,7 @@ export class Builder {
         return target
       },
       addWatchFile: path => {
-        watchFiles.push(resolve(dirname(from(documentMeta, config)), path))
+        watchFiles.push(resolve(directoryOf(documentMeta, collection, config), path))
       }
     }
   }
@@ -1645,8 +1645,23 @@ function toDocument(entry: StoreEntry): AnyDocument {
   return { ...entry.data, _meta: meta as DocumentMeta }
 }
 
-function from(meta: DocumentMeta, config: ResolvedConfig): string {
-  return resolve(config.root, meta.filePath)
+/**
+ * The directory a document's relative paths resolve against.
+ *
+ * `meta.filePath` is relative to the collection's directory, not the project
+ * root. Resolving it against the root pointed `addWatchFile('./x')` at a file
+ * that did not exist for every collection outside the root, so the document
+ * never rebuilt. A loader's documents have no file of their own, so theirs
+ * resolve against the project root.
+ */
+function directoryOf(
+  meta: DocumentMeta,
+  collection: ResolvedCollection,
+  config: ResolvedConfig
+): string {
+  return collection.directory === undefined
+    ? config.root
+    : dirname(resolve(collection.directory, meta.filePath))
 }
 
 function describeValue(value: unknown): string {

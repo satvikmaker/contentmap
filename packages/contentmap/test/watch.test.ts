@@ -499,6 +499,40 @@ export default defineConfig({ collections: { posts } })
     }
   })
 
+  fixtureTest('resolves a relative addWatchFile path against the document', async ({ fixture }) => {
+    // meta.filePath is relative to the collection's directory. Resolving it
+    // against the project root watched `posts/data.txt` for a document in
+    // `content/posts/` — a file that does not exist — so editing the real
+    // one never rebuilt anything.
+    await fixture.write('content/posts/data.txt', 'one')
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content/posts', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: (doc, ctx) => {
+    ctx.addWatchFile('./data.txt')
+    return { title: doc.title }
+  }
+})
+export default defineConfig({ collections: { posts } })
+`
+    )
+    await fixture.write('content/posts/a.md', '---\ntitle: A\n---\nx')
+
+    const builder = createBuilder({ root: fixture.dir, concurrency: 1 })
+    try {
+      await builder.build()
+      const handle = await builder.watch({ debounce: 20 })
+      expect(handle.paths).toContain(join(fixture.dir, 'content/posts/data.txt'))
+      expect(handle.paths).not.toContain(join(fixture.dir, 'posts/data.txt'))
+    } finally {
+      await builder.close()
+    }
+  })
+
   fixtureTest('a builder stays usable after close', async ({ fixture }) => {
     // close() aborts the signal loaders receive; a later build must not
     // inherit it.
