@@ -33,6 +33,7 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
+    "inflection": "^3.0.2",
     "typescript": "^5.9.3"
   }
 }

@@ -1,4 +1,14 @@
-import { callsTo, objectOf, prop, resolveObject, stringOf, text, ts } from '../ts.ts'
+import {
+  callsTo,
+  elementsOf,
+  prop,
+  resolveArray,
+  resolveObject,
+  short,
+  stringOf,
+  text,
+  ts
+} from '../ts.ts'
 import type { CollectionPlan, EmitPlan } from '../emit.ts'
 import type { Note } from '../types.ts'
 
@@ -14,9 +24,10 @@ import type { Note } from '../types.ts'
 export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
   const notes: Note[] = []
   const collections: CollectionPlan[] = []
+  const carry: ts.Node[] = []
 
   const configCall = callsTo(file, 'defineConfig')[0]
-  const configObject = configCall ? objectOf(configCall.arguments[0]) : undefined
+  const configObject = configCall ? resolveObject(file, configCall.arguments[0]) : undefined
 
   // `content` is current; `collections` is deprecated but still everywhere.
   const listExpr =
@@ -24,9 +35,17 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
     (configObject && prop(configObject, 'collections'))
 
   const elements: ts.Expression[] = []
-  const array = listExpr && ts.isArrayLiteralExpression(listExpr) ? listExpr : undefined
+  const array = resolveArray(file, listExpr)
   if (array) {
-    for (const el of array.elements) elements.push(el)
+    const unfollowed = (node: ts.Node): void => {
+      notes.push({
+        kind: 'manual',
+        subject: 'collections',
+        message: `\`${short(node)}\` could not be followed, so the collections it adds were not migrated`,
+        hint: 'Add them to the generated config by hand.'
+      })
+    }
+    elements.push(...elementsOf(file, array, unfollowed))
   } else {
     // No config call found, or it referenced something we cannot follow: fall
     // back to every defineCollection in the file, which is what the user meant.
@@ -68,10 +87,14 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
     if (single) plan.single = true
 
     const schema = prop(object, 'schema')
-    if (schema) plan.schema = text(schema)
+    if (schema) {
+      plan.schema = text(schema)
+      carry.push(schema)
+    }
 
     const transform = prop(object, 'transform')
     if (transform) {
+      carry.push(transform)
       const original = text(transform)
       // content-collections hands `_meta` to the transform on the document.
       // contentmap validates first and passes only the schema's own output, so
@@ -132,11 +155,12 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
 
   return {
     imports: [
-      "import { defineCollection, defineConfig } from 'contentmap'",
-      "import { z } from 'zod'"
+      { module: 'contentmap', names: ['defineCollection', 'defineConfig'] },
+      { module: 'zod', names: ['z'] }
     ],
     collections,
-    notes
+    notes,
+    carry
   }
 }
 

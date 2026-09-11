@@ -1,0 +1,9 @@
+{
+  "posts": {
+    "kept": {
+      "label": "Post:5",
+      "article": { "raw": { "$contains": "Body." } }
+    },
+    "$missing": ["invalid", "drafts/secret"]
+  }
+}

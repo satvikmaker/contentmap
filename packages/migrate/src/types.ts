@@ -27,8 +27,19 @@ export interface MigrationResult {
   /** Collections that were translated, in source order. */
   collections: string[]
   notes: Note[]
-  /** Packages the generated config needs. */
+  /** Packages the generated config, and the steps the report asks for, need. */
   install: string[]
+}
+
+export interface MigrateOptions {
+  /**
+   * Where the generated config will be written.
+   *
+   * Imports carried over from the original config are relative to it, so they
+   * are re-pointed from here and still name the same files. Defaults to beside
+   * the original.
+   */
+  outFile?: string
 }
 
 /**

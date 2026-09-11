@@ -1,0 +1,8 @@
+name: Lisbon
+location: { lat: 38.72, lng: -9.14 }
+tags: [a]
+stops:
+  - { lat: 1, lng: 2 }
+media:
+  - { type: Image, src: /a.png }
+  - { type: Video, url: /b.mp4 }

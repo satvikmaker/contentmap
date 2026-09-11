@@ -1,3 +1,5 @@
+import type { Node } from 'typescript'
+import type { Carried } from './carry.ts'
 import type { Field, Note } from './types.ts'
 
 export interface CollectionPlan {
@@ -20,24 +22,81 @@ export interface CollectionPlan {
    */
   schema?: string
   fields: Field[]
-  /** Emitted verbatim as the body of `transform`, if present. */
+  /** Emitted as the value of `transform`, if present. */
   transform?: string
-  /** Lines to place above the collection, e.g. a TODO. */
-  comments?: string[]
+}
+
+/** An import the generated code needs for itself. */
+export interface Import {
+  module: string
+  names: string[]
 }
 
 export interface EmitPlan {
-  imports: string[]
+  imports: Import[]
   collections: CollectionPlan[]
   /** Extra properties on defineConfig, already formatted as `key: value`. */
   configProps?: string[]
   notes: Note[]
+  /**
+   * Source nodes whose text the plan emits. Whatever they refer to at the top
+   * of the original file comes along into the new one.
+   */
+  carry?: Node[]
+  /** Packages the migration calls for, beyond contentmap and zod. */
+  install?: string[]
+  /** Tool imports the translation rewrites away, and how carried code follows. */
+  vocabulary?: { names: ReadonlySet<string>; rewrite(code: string): string }
 }
 
-const quote = (s: string): string => `'${s.replace(/'/g, "\\'")}'`
+const quote = (s: string): string => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 
 const list = (value: string | string[]): string =>
   Array.isArray(value) ? `[${value.map(quote).join(', ')}]` : quote(value)
+
+/** A property key, quoted only when it has to be — `og-image` is not an identifier. */
+export function propertyKey(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : quote(name)
+}
+
+/**
+ * Re-indent lifted code to where it now starts.
+ *
+ * Continuation lines keep their old indentation otherwise, and code lifted out
+ * of a nested position then sits visibly wrong in a file that is the first
+ * thing the user reads after migrating. The first line is left alone — the
+ * caller has already placed it. Lines that begin inside a template literal are
+ * part of a string, and re-indenting them would change the string.
+ */
+export function reindent(code: string, indent: string): string {
+  const lines = code.split('\n')
+  if (lines.length === 1) return code
+  const inString: boolean[] = []
+  let ticks = backticks(lines[0] ?? '')
+  for (const line of lines.slice(1)) {
+    inString.push(ticks % 2 === 1)
+    ticks += backticks(line)
+  }
+  const rest = lines.slice(1)
+  const margins = rest
+    .filter((line, i) => !inString[i] && line.trim() !== '')
+    .map(line => line.length - line.trimStart().length)
+  const margin = margins.length > 0 ? Math.min(...margins) : 0
+  return [
+    lines[0] ?? '',
+    ...rest.map((line, i) =>
+      inString[i] ? line : line.trim() === '' ? '' : indent + line.slice(margin)
+    )
+  ].join('\n')
+}
+
+function backticks(line: string): number {
+  let count = 0
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '`' && line[i - 1] !== '\\') count++
+  }
+  return count
+}
 
 /**
  * Names contentmap refuses, because collection names become export names.
@@ -75,14 +134,15 @@ function toIdentifier(raw: string): string {
  * Make a plan emittable.
  *
  * Every problem fixed here produced a file that does not compile: a name with a
- * hyphen becomes `const my-posts`, two document types that pluralise alike
- * declare the same `const` twice, and an implicitly injected body field
- * collides with one the author already declared. All three are rare enough to
- * miss by hand and certain to waste someone's afternoon.
+ * hyphen becomes `const my-posts`, and two document types that pluralise alike
+ * declare the same `const` twice. So does a collection named like something
+ * carried over from the original config — `reserved` holds those names, and
+ * the collection is the one that moves, because the carried code already
+ * refers to its own.
  */
-export function normalizePlan(plan: EmitPlan): Note[] {
+export function normalizePlan(plan: EmitPlan, reserved: ReadonlySet<string> = new Set()): Note[] {
   const notes: Note[] = []
-  const taken = new Set<string>()
+  const taken = new Set<string>(reserved)
   const typeNames = new Set<string>()
 
   for (const collection of plan.collections) {
@@ -104,8 +164,10 @@ export function normalizePlan(plan: EmitPlan): Note[] {
         kind: 'review',
         collection: wanted,
         subject: 'name',
-        message: `renamed to \`${unique}\` — another collection already claimed \`${wanted}\``,
-        hint: 'Two definitions produced the same name. Pick something meaningful for each.'
+        message: reserved.has(wanted)
+          ? `renamed to \`${unique}\` — \`${wanted}\` is already declared by code carried over from your config`
+          : `renamed to \`${unique}\` — another collection already claimed \`${wanted}\``,
+        hint: 'Two things produced the same name. Pick something meaningful for each.'
       })
     }
     taken.add(unique)
@@ -132,28 +194,6 @@ export function normalizePlan(plan: EmitPlan): Note[] {
       typeNames.add(type)
       collection.typeName = type
     }
-
-    // Later wins: an implicit body field is added before the author's own, so
-    // keeping the last one keeps what they actually wrote.
-    const seen = new Map<string, number>()
-    const fields: typeof collection.fields = []
-    for (const field of collection.fields) {
-      const at = seen.get(field.name)
-      if (at === undefined) {
-        seen.set(field.name, fields.length)
-        fields.push(field)
-        continue
-      }
-      fields[at] = field
-      notes.push({
-        kind: 'review',
-        collection: unique,
-        subject: field.name,
-        message: 'was declared twice; the one from your config was kept',
-        hint: 'contentmap injects the body as `content` unless the schema names it itself.'
-      })
-    }
-    collection.fields = fields
   }
   return notes
 }
@@ -165,13 +205,23 @@ export function normalizePlan(plan: EmitPlan): Note[] {
  * the user reads after migrating, and it has to look like something a person
  * wrote. A generated-looking config invites a rewrite, which defeats the point.
  */
-export function emitConfig(plan: EmitPlan): string {
+export function emitConfig(plan: EmitPlan, carried?: Carried): string {
   const out: string[] = []
-  for (const line of plan.imports) out.push(line)
+  for (const { module, names } of plan.imports) {
+    // Carried code that binds the same name wins: a config written against
+    // `zod/v4` keeps its own `z`, and its schemas keep meaning what they did.
+    const kept = names.filter(name => !carried?.names.has(name))
+    if (kept.length > 0) out.push(`import { ${kept.join(', ')} } from ${quote(module)}`)
+  }
+  for (const line of carried?.imports ?? []) out.push(line)
   out.push('')
 
+  for (const declaration of carried?.declarations ?? []) {
+    out.push(declaration)
+    out.push('')
+  }
+
   for (const collection of plan.collections) {
-    for (const comment of collection.comments ?? []) out.push(comment)
     out.push(`const ${collection.key} = defineCollection({`)
     out.push(`  name: ${quote(collection.name)},`)
     if (collection.typeName) out.push(`  typeName: ${quote(collection.typeName)},`)
@@ -182,20 +232,20 @@ export function emitConfig(plan: EmitPlan): string {
     if (collection.single) out.push('  single: true,')
 
     if (collection.schema) {
-      out.push(`  schema: ${collection.schema},`)
+      out.push(`  schema: ${reindent(collection.schema, '  ')},`)
     } else if (collection.fields.length === 0) {
       out.push('  schema: z.object({}),')
     } else {
       out.push('  schema: z.object({')
       collection.fields.forEach((field, i) => {
         const comma = i === collection.fields.length - 1 ? '' : ','
-        out.push(`    ${field.name}: ${field.expression}${comma}`)
+        out.push(`    ${propertyKey(field.name)}: ${reindent(field.expression, '    ')}${comma}`)
       })
       out.push('  }),')
     }
 
     if (collection.transform) {
-      out.push(`  transform: ${collection.transform}`)
+      out.push(`  transform: ${reindent(collection.transform, '  ')}`)
     }
     // Trim the trailing comma of the final property, and of the last schema
     // field: the generated file is the first thing the user reads, and a
@@ -208,7 +258,14 @@ export function emitConfig(plan: EmitPlan): string {
 
   const keys = plan.collections.map(c => c.key)
   const props = [`collections: { ${keys.join(', ')} }`, ...(plan.configProps ?? [])]
-  out.push(`export default defineConfig({ ${props.join(', ')} })`)
+  const inline = `export default defineConfig({ ${props.join(', ')} })`
+  if (inline.length <= 100 && !inline.includes('\n')) {
+    out.push(inline)
+  } else {
+    out.push('export default defineConfig({')
+    props.forEach((p, i) => out.push(`  ${reindent(p, '  ')}${i === props.length - 1 ? '' : ','}`))
+    out.push('})')
+  }
   return `${out.join('\n')}\n`
 }
 

@@ -1,0 +1,11 @@
+{
+  "posts": {
+    "hello-world": {
+      "words": 4,
+      "file": "hello-world.md",
+      "folder": ".",
+      "heading": "Hello World",
+      "url": "https://example.com/content/hello-world"
+    }
+  }
+}

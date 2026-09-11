@@ -1,0 +1,15 @@
+{
+  "notes": {
+    "notes/first-note": {
+      "block": "NOTES/FIRST-NOTE",
+      "method": "first-note.yaml",
+      "named": "first-note",
+      "destructured": "First@notes/first-note",
+      "whole": "notes/first-note.yaml:Note",
+      "later": "first",
+      "kind": "Note",
+      "id": "notes/first-note.yaml",
+      "folder": "notes"
+    }
+  }
+}

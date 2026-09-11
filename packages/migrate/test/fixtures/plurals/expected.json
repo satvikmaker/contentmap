@@ -1,0 +1,7 @@
+{
+  "authors": { "authors/a": { "name": "A" } },
+  "people": { "people/p": { "name": "P" } },
+  "categories": { "categories/c": { "name": "C" } },
+  "series": { "series/s": { "name": "S" } },
+  "posts": { "posts/x": { "name": "X" } }
+}

@@ -1,0 +1,8 @@
+{
+  "posts": {
+    "hello": {
+      "compiled": true,
+      "body": { "code": { "$mdx": ["BIG NEWS", "WORLD", "marked"] } }
+    }
+  }
+}

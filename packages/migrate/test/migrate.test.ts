@@ -82,8 +82,11 @@ describe('contentlayer2', () => {
     expect(result.config).toContain("status: z.enum(['draft', 'published']),")
   })
 
-  it('injects the body field contentlayer supplied implicitly', () => {
-    expect(result.config).toContain('content: z.string(),')
+  it('rebuilds the body the way contentlayer shaped it', () => {
+    // Pages render `post.body.html`; a body under another name means
+    // rewriting every one of them.
+    expect(result.config).toContain('const body = { raw: ctx.body, html: await ctx.markdown() }')
+    expect(result.config).not.toContain('content: z.string()')
     expect(result.notes.some(n => n.subject === 'body')).toBe(true)
   })
 
@@ -92,7 +95,7 @@ describe('contentlayer2', () => {
     // crashes on the first build — which looks like the tool half worked.
     // These are exact equivalents, which is what makes rewriting them safe.
     expect(result.config).toContain('slug: ctx.meta.path')
-    expect(result.config).toContain('readingTime: ctx.body.split')
+    expect(result.config).toContain('readingTime: body.raw.split')
     expect(result.config).not.toContain('_raw')
 
     const slug = result.notes.find(n => n.subject === 'computedFields.slug')
@@ -100,7 +103,7 @@ describe('contentlayer2', () => {
     expect(slug?.message).toContain('_raw.flattenedPath -> ctx.meta.path')
   })
 
-  it('preserves a resolver it cannot reduce, rather than dropping it', () => {
+  it('calls a resolver it cannot inline with the document it was written for', () => {
     const withBlock = migrate(
       CONTENTLAYER.replace(
         'resolve: doc => doc._raw.flattenedPath',
@@ -108,10 +111,15 @@ describe('contentlayer2', () => {
       ),
       'contentlayer2'
     )
-    // A block body needs a human. It is carried over verbatim and attributed.
-    expect(withBlock.config).toContain('TODO(contentmap): from contentlayer computedFields.slug')
-    expect(withBlock.config).toContain('p.toUpperCase()')
-    expect(withBlock.notes.find(n => n.subject === 'computedFields.slug')?.kind).toBe('manual')
+    // A block body used to become a TODO. Handed an object in contentlayer's
+    // shape instead, it runs exactly as it did.
+    expect(withBlock.config).toContain(
+      'slug: await (doc => { const p = doc._raw.flattenedPath; return p.toUpperCase() })(legacy)'
+    )
+    expect(withBlock.config).toContain('flattenedPath: ctx.meta.path')
+    expect(withBlock.notes.find(n => n.subject === 'computedFields.slug')?.message).toContain(
+      'called as written'
+    )
   })
 
   it('reports what it could not do rather than guessing', () => {
@@ -126,18 +134,17 @@ describe('contentlayer2', () => {
 })
 
 describe('mdx is no longer a dead end', () => {
-  it('points a contentlayer mdx collection at @contentmap/mdx', () => {
-    // This used to say "keep this collection on its current tool", which for
-    // an unmaintained tool is not advice anyone can act on.
+  it('wires a contentlayer mdx collection up to @contentmap/mdx', () => {
+    // This first said "keep this collection on its current tool", then "set
+    // it up yourself". Neither is a migration.
     const result = migrate(
       CONTENTLAYER.replace("contentType: 'markdown'", "contentType: 'mdx'"),
       'contentlayer2'
     )
 
-    const note = result.notes.find(n => n.subject.includes('mdx'))
-    expect(note?.kind).not.toBe('unsupported')
-    expect(note?.hint).toContain('@contentmap/mdx')
-    expect(note?.hint).toContain('ctx.mdx()')
+    expect(result.config).toContain("import { mdx } from '@contentmap/mdx'")
+    expect(result.config).toContain("mdx: mdx({ compat: 'mdx-bundler' })")
+    expect(result.config).toContain('code: await ctx.mdx()')
     expect(result.install).toContain('@contentmap/mdx')
   })
 
@@ -313,9 +320,9 @@ describe('output that has to compile', () => {
     expect(result.config).toContain("typeName: 'Post2'")
   })
 
-  it('keeps the author’s field when it collides with an injected one', () => {
-    // contentlayer supplies the body implicitly, so a document that also
-    // declares `content` produced a duplicate key in the object literal.
+  it('leaves a field named content to its author', () => {
+    // An injected `content` body field once collided with a declared one and
+    // produced a duplicate key. The body now goes where contentlayer put it.
     const result = migrate(
       `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
        const A = defineDocumentType(() => ({ name: 'Post', filePathPattern: '*.md',
@@ -323,10 +330,9 @@ describe('output that has to compile', () => {
        export default makeSource({ contentDirPath: 'c', documentTypes: [A] })`,
       'contentlayer2'
     )
-    // One declaration, and it is the one from their config.
     expect(result.config.match(/content:/g)).toHaveLength(1)
     expect(result.config).toContain('content: z.number().optional()')
-    expect(result.notes.some(n => n.message.includes('declared twice'))).toBe(true)
+    expect(result.config).toContain('const body = { raw: ctx.body')
   })
 
   it('never emits a reserved word as a collection name', () => {

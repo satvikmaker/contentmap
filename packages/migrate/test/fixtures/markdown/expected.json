@@ -1,0 +1,8 @@
+{
+  "posts": {
+    "hello": {
+      "opening": "# Hea",
+      "body": { "html": { "$contains": ["<h1>HEADING</h1>", "~~STRUCK~~"] } }
+    }
+  }
+}

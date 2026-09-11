@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { detect } from '../src/detect.ts'
-import { run } from '../src/cli.ts'
+import { run } from '../src/run.ts'
 import { fixtureTest } from '../../contentmap/test/helpers.ts'
 
 const VELITE = `import { defineConfig, defineCollection, s } from 'velite'

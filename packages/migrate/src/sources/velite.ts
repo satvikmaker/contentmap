@@ -1,4 +1,14 @@
-import { callsTo, objectOf, prop, resolveObject, stringOf, text, ts } from '../ts.ts'
+import {
+  callsTo,
+  entriesOf,
+  objectOf,
+  prop,
+  resolveObject,
+  short,
+  stringOf,
+  text,
+  ts
+} from '../ts.ts'
 import type { CollectionPlan, EmitPlan } from '../emit.ts'
 import type { Note } from '../types.ts'
 
@@ -16,6 +26,8 @@ interface Helper {
   message: string
   hint: string
   kind: Note['kind']
+  /** Package the replacement needs. */
+  install?: string
 }
 
 const HELPERS: Record<string, Helper> = {
@@ -23,7 +35,9 @@ const HELPERS: Record<string, Helper> = {
     schema: 'z.coerce.date()',
     kind: 'review',
     message: 'became z.coerce.date()',
-    hint: 'velite stored an ISO string; this gives you a real Date. Format at the point of use.'
+    hint:
+      'velite stored an ISO string; this gives you a real Date. To keep the string, use ' +
+      '`z.coerce.date().transform(d => d.toISOString())`.'
   },
   slug: {
     schema: 'z.string().optional()',
@@ -36,14 +50,16 @@ const HELPERS: Record<string, Helper> = {
     message: 'rendering is a transform in contentmap, not a schema field',
     hint:
       'Add `content: z.string()` and, in transform, `html: await ctx.markdown()`. ' +
-      'Register a renderer: `renderer: markdown()` from @contentmap/markdown.'
+      'Register a renderer: `renderer: markdown()` from @contentmap/markdown.',
+    install: '@contentmap/markdown'
   },
   mdx: {
     kind: 'manual',
     message: 'MDX compiles through @contentmap/mdx',
     hint:
       'Install @contentmap/mdx, set `mdx: mdx()` on the config, and add ' +
-      '`code: await ctx.mdx()` to transform. velite produced the same function-body string.'
+      '`code: await ctx.mdx()` to transform. velite produced the same function-body string.',
+    install: '@contentmap/mdx'
   },
   image: {
     // The frontmatter value is a path string; only the processing moves.
@@ -53,7 +69,8 @@ const HELPERS: Record<string, Helper> = {
     message: 'stayed a string; the processing moves to a transform',
     hint:
       'Declare the path as `z.string()` and call `ctx.image(doc.cover)` in transform, which ' +
-      'returns src, dimensions and a placeholder. Needs @contentmap/image.'
+      'returns src, dimensions and a placeholder. Needs @contentmap/image.',
+    install: '@contentmap/image'
   },
   file: {
     schema: 'z.string()',
@@ -95,29 +112,47 @@ const HELPERS: Record<string, Helper> = {
   }
 }
 
+interface Context {
+  notes: Note[]
+  carry: ts.Node[]
+  install: Set<string>
+  /** The local name velite's `s` was imported as. */
+  s: string
+  toZod(code: string): string
+}
+
 export function migrateVelite(file: ts.SourceFile): EmitPlan {
   const notes: Note[] = []
   const collections: CollectionPlan[] = []
-
-  const configCall = callsTo(file, 'defineConfig')[0]
-  const configObject = configCall ? objectOf(configCall.arguments[0]) : undefined
-  const root = stringOf(configObject && prop(configObject, 'root')) ?? 'content'
-
-  const collectionsObject = configObject ? objectOf(prop(configObject, 'collections')) : undefined
-
-  const entries: { key: string; expr: ts.Expression }[] = []
-  if (collectionsObject) {
-    for (const member of collectionsObject.properties) {
-      if (ts.isPropertyAssignment(member) && ts.isIdentifier(member.name)) {
-        entries.push({ key: member.name.text, expr: member.initializer })
-      } else if (ts.isShorthandPropertyAssignment(member)) {
-        entries.push({ key: member.name.text, expr: member.name })
-      }
-    }
+  const s = schemaName(file)
+  const pattern = new RegExp(`\\b${s.replace(/\$/g, '\\$')}\\.`, 'g')
+  const context: Context = {
+    notes,
+    carry: [],
+    install: new Set(),
+    s,
+    toZod: code => code.replace(pattern, 'z.')
   }
 
-  for (const { key, expr } of entries) {
-    const object = resolveObject(file, expr)
+  const configCall = callsTo(file, 'defineConfig')[0]
+  const configObject = configCall ? resolveObject(file, configCall.arguments[0]) : undefined
+  const root = stringOf(configObject && prop(configObject, 'root')) ?? 'content'
+
+  const collectionsExpr = configObject && prop(configObject, 'collections')
+  const collectionsObject = resolveObject(file, collectionsExpr)
+  const unfollowed = (node: ts.Node): void => {
+    notes.push({
+      kind: 'manual',
+      subject: 'collections',
+      message: `\`${short(node)}\` could not be followed, so the collections it adds were not migrated`,
+      hint: 'Add them to the generated config by hand.'
+    })
+  }
+  if (collectionsExpr && !collectionsObject) unfollowed(collectionsExpr)
+  const entries = collectionsObject ? entriesOf(file, collectionsObject, unfollowed) : []
+
+  for (const { name: key, value } of entries) {
+    const object = resolveObject(file, value)
     if (!object) {
       notes.push({
         kind: 'manual',
@@ -142,8 +177,7 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
     if (include !== undefined) plan.include = include
     if (prop(object, 'single')?.kind === ts.SyntaxKind.TrueKeyword) plan.single = true
 
-    const schema = prop(object, 'schema')
-    translateSchema(schema, key, plan, notes)
+    translateSchema(file, prop(object, 'schema'), key, plan, context)
     collections.push(plan)
   }
 
@@ -166,12 +200,32 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
 
   return {
     imports: [
-      "import { defineCollection, defineConfig } from 'contentmap'",
-      "import { z } from 'zod'"
+      { module: 'contentmap', names: ['defineCollection', 'defineConfig'] },
+      { module: 'zod', names: ['z'] }
     ],
     collections,
-    notes
+    notes,
+    carry: context.carry,
+    install: [...context.install],
+    // Carried schema fragments — `const tags = s.array(s.string())` — speak
+    // velite's `s` too, and have to come across as zod like everything else.
+    vocabulary: { names: new Set([s]), rewrite: context.toZod }
   }
+}
+
+/** The name `s` was imported under: `import { s } from 'velite'`, or an alias. */
+function schemaName(file: ts.SourceFile): string {
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement)) continue
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
+    if (statement.moduleSpecifier.text !== 'velite') continue
+    const named = statement.importClause?.namedBindings
+    if (!named || !ts.isNamedImports(named)) continue
+    for (const element of named.elements) {
+      if ((element.propertyName ?? element.name).getText() === 's') return element.name.text
+    }
+  }
+  return 's'
 }
 
 /**
@@ -181,12 +235,14 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
  * variable — is reported rather than guessed at.
  */
 function translateSchema(
+  file: ts.SourceFile,
   schema: ts.Expression | undefined,
   key: string,
   plan: CollectionPlan,
-  notes: Note[]
+  context: Context
 ): void {
-  const object = schema && findObjectArgument(schema)
+  const { notes } = context
+  const object = schema && findObjectArgument(file, schema)
   if (!object) {
     if (schema) {
       notes.push({
@@ -196,14 +252,12 @@ function translateSchema(
         message: 'is not a plain `s.object({ … })`, so it was carried over unchanged',
         hint: 'Replace the `s.` calls with their `z.` equivalents by hand.'
       })
-      plan.schema = text(schema).replace(/\bs\./g, 'z.')
+      plan.schema = context.toZod(text(schema))
+      context.carry.push(schema)
     }
     return
   }
 
-  if (schema && ts.isCallExpression(schema) === false && !ts.isPropertyAccessExpression(schema)) {
-    // fall through — object came from somewhere sensible
-  }
   if (schema && /\.transform\(|\.superRefine\(|\.refine\(/.test(text(schema))) {
     notes.push({
       kind: 'manual',
@@ -215,13 +269,17 @@ function translateSchema(
   }
 
   let needsBody = false
-  for (const member of object.properties) {
-    if (!ts.isPropertyAssignment(member)) continue
-    const name =
-      ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) ? member.name.text : undefined
-    if (!name) continue
-
-    const helper = helperFor(member.initializer)
+  const entries = entriesOf(file, object, node =>
+    notes.push({
+      kind: 'manual',
+      collection: key,
+      subject: 'schema',
+      message: `\`${short(node)}\` could not be followed, so the fields it adds were not carried over`,
+      hint: 'Add them to the schema by hand.'
+    })
+  )
+  for (const { name, value } of entries) {
+    const helper = helperFor(value, context.s)
     if (helper === 'markdown' || helper === 'mdx' || helper === 'raw') needsBody = true
     if (helper) {
       const spec = HELPERS[helper]!
@@ -232,11 +290,13 @@ function translateSchema(
         message: spec.message,
         hint: spec.hint
       })
+      if (spec.install) context.install.add(spec.install)
       if (spec.schema) plan.fields.push({ name, expression: spec.schema })
       continue
     }
     // Plain zod: `s.string().max(99)` is `z.string().max(99)`.
-    plan.fields.push({ name, expression: text(member.initializer).replace(/\bs\./g, 'z.') })
+    plan.fields.push({ name, expression: context.toZod(text(value)) })
+    context.carry.push(value)
   }
 
   // velite's markdown/mdx/raw helpers read the document body. contentmap injects
@@ -247,9 +307,19 @@ function translateSchema(
   }
 }
 
-/** The first object-literal argument in a call chain like `s.object({…}).transform(…)`. */
-function findObjectArgument(node: ts.Expression): ts.ObjectLiteralExpression | undefined {
+/**
+ * The object literal inside `s.object({…}).transform(…)`, or inside a const
+ * the schema names — `schema: postSchema` is as common as the inline form.
+ */
+function findObjectArgument(
+  file: ts.SourceFile,
+  node: ts.Expression
+): ts.ObjectLiteralExpression | undefined {
   let current: ts.Expression | undefined = node
+  if (ts.isIdentifier(current)) {
+    const init = resolveInitializer(file, current.text)
+    if (init) current = init
+  }
   while (current && ts.isCallExpression(current)) {
     for (const arg of current.arguments) {
       const object = objectOf(arg)
@@ -261,15 +331,25 @@ function findObjectArgument(node: ts.Expression): ts.ObjectLiteralExpression | u
   return undefined
 }
 
+function resolveInitializer(file: ts.SourceFile, name: string): ts.Expression | undefined {
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const decl of statement.declarationList.declarations) {
+      if (ts.isIdentifier(decl.name) && decl.name.text === name) return decl.initializer
+    }
+  }
+  return undefined
+}
+
 /** `s.image()` -> 'image', for the outermost velite helper in a chain. */
-function helperFor(node: ts.Expression): string | undefined {
+function helperFor(node: ts.Expression, s: string): string | undefined {
   let current: ts.Expression | undefined = node
   while (current && ts.isCallExpression(current)) {
     const target: ts.Expression = current.expression
     if (!ts.isPropertyAccessExpression(target)) return undefined
     const name = target.name.text
     const receiver: ts.Expression = target.expression
-    if (ts.isIdentifier(receiver) && receiver.text === 's' && name in HELPERS) return name
+    if (ts.isIdentifier(receiver) && receiver.text === s && name in HELPERS) return name
     current = receiver
   }
   return undefined

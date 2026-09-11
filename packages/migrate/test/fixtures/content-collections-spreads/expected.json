@@ -1,0 +1,4 @@
+{
+  "posts": { "hello": { "slug": "hello", "words": 2 } },
+  "pages": { "about": { "title": "About" } }
+}

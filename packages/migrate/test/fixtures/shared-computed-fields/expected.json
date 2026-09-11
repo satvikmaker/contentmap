@@ -1,0 +1,8 @@
+{
+  "posts": {
+    "posts/hello": { "slug": "hello", "path": "posts/hello", "url": "/blog/posts/hello" }
+  },
+  "pages": {
+    "pages/about": { "slug": "about", "path": "pages/about" }
+  }
+}

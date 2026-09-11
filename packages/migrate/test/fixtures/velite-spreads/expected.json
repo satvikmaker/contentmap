@@ -1,0 +1,4 @@
+{
+  "posts": { "posts/a": { "title": "A", "tags": ["x"] } },
+  "notes": { "notes/b": { "title": "B" } }
+}
