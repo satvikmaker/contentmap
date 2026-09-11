@@ -86,6 +86,8 @@ Under a low file-descriptor limit, Content Collections **silently lost 2,758 of 
 
 > A document that violates its schema **fails the build by default.** Velite emits schema-violating data and exits 0.
 
+That holds through every integration too: `next build`, `vite build`, `nuxt build`, `astro build` and webpack stop on the same report `contentmap build` prints.
+
 ### Your install doesn't balloon
 
 <a name="the-numbers"></a>1,000 Markdown documents, every tool configured for frontmatter plus schema validation. Reproduce with `pnpm bench:compare`.
@@ -131,11 +133,37 @@ npx contentmap build
 | **Remote content**      | Digest-keyed revalidation, `--frozen` for offline CI, credentials screened out of the cache                                                       |
 | **Incremental**         | Transform cache keyed by content digest — never by mtime alone                                                                                    |
 | **Watch mode**          | Debounced, coalesced, one build at a time; a broken config keeps the last good output                                                             |
+| **After the build**     | A hook with every document in hand — search indexes, feeds, tag counts — run identically by the CLI and every integration                         |
 | **Diagnostics**         | Grouped by kind, with code frames, did-you-mean hints, and `--json` for CI                                                                        |
 
 ### Transform context
 
 Inside `transform`, `ctx` gives you: `meta`, `body`, `markdown()`, `mdx()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`, `image()`, `asset()`, `emitFile()`, `documents()`, `siblings()`, `reference()`, `addWatchFile()`, `cache()` and `skip()`.
+
+### After the build
+
+`afterBuild` runs once a build has succeeded, with every document in hand — the place for a search index, a feed, or tag counts.
+
+```ts
+import { defineCollection, defineConfig } from 'contentmap'
+import { z } from 'zod'
+
+const posts = defineCollection({
+  directory: 'content/posts',
+  include: '**/*.md',
+  schema: z.object({ title: z.string(), tags: z.array(z.string()).default([]) })
+})
+
+export default defineConfig({
+  collections: { posts },
+  afterBuild: async ctx => {
+    const search = ctx.documents(posts).map(({ title, _meta }) => ({ title, path: _meta.path }))
+    await ctx.writeFile('public/search.json', JSON.stringify(search))
+  }
+})
+```
+
+It runs inside the build, so `contentmap build`, `contentmap dev` and every framework integration run it the same way, and CI diffs its output between them. `ctx.writeFile` skips unchanged bytes, so a dev server doesn't reload for nothing, and the watcher never mistakes it for an edit. A hook that throws fails the build; none runs after a build that failed, because its documents are incomplete.
 
 ### CLI
 
@@ -170,7 +198,7 @@ npx @contentmap/migrate
 
 Reads your existing config, writes a contentmap one beside it, and writes a report of anything needing a human. **Your original config is never modified.**
 
-Contentlayer's field DSL becomes a Zod schema, `computedFields` become a transform, and the document shape is rewritten onto contentmap's context — `_raw.flattenedPath` → `ctx.meta.path`, `body.raw` → `ctx.body`. Those are exact equivalents, which is what makes rewriting them automatically safe. [Details](packages/migrate).
+Contentlayer's field DSL becomes a Zod schema, `computedFields` become a transform, and `_raw.flattenedPath` becomes `ctx.meta.path` — exact equivalents, which is what makes rewriting them automatically safe. Your documents keep the shape your pages already read (`body.raw`, `body.code`, `body.html`), MDX compiles so `useMDXComponent` keeps rendering it, the helpers and imports your config uses come along, and `onSuccess` becomes `afterBuild`. Every pattern it handles is a fixture that CI migrates and builds for real. [Details](packages/migrate).
 
 ## FAQ
 
@@ -189,7 +217,7 @@ Yes. Contentlayer is unmaintained — it died when its sponsor withdrew, and a v
 <details>
 <summary><strong>Does it support MDX?</strong></summary>
 
-Yes, via [`@contentmap/mdx`](packages/mdx). It compiles to the same function-body string Contentlayer and Velite produce, so your rendering code ports across unchanged.
+Yes, via [`@contentmap/mdx`](packages/mdx). It compiles to the function body that Velite produces and `run()` evaluates. With `compat: 'mdx-bundler'`, the same string also renders under mdx-bundler's `getMDXComponent` — what Contentlayer and Content Collections pages use — so rendering code ports across unchanged.
 </details>
 
 <details>
@@ -228,9 +256,10 @@ Shipped, and what's next — the detail lives in [ROADMAP.md](ROADMAP.md).
 - [x] Markdown, MDX, YAML, JSON, JSONC, TOML, raw, and custom parsers
 - [x] Syntax highlighting, images, assets, cross-collection references
 - [x] Remote sources, watch mode, incremental cache
-- [x] Five framework adapters, each proven against its real toolchain
-- [x] A codemod for all three incumbents
-- [ ] Search index generation for Pagefind, Orama and MiniSearch
+- [x] Five framework adapters, each proven against its real toolchain, failing a build exactly where the CLI would
+- [x] A codemod for all three incumbents, built for real against every config pattern it handles
+- [x] `afterBuild` — search indexes, feeds and tag counts, run identically everywhere
+- [ ] Search index helpers for Pagefind, Orama and MiniSearch
 - [ ] `@contentmap/git` — dates and authors from history
 - [ ] Documentation site
 

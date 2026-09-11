@@ -46,6 +46,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 
 - [x] Renderers as opt-in packages: `@contentmap/markdown` (marked) and `@contentmap/unified` (remark/rehype)
 - [x] MDX via `@contentmap/mdx` — JSX, component imports and value exports, compiled to a function body
+- [x] MDX in mdx-bundler compat mode, so pages rendering with `getMDXComponent` or `useMDXComponent` keep working after a migration
 - [x] Syntax highlighting via `@contentmap/shiki` — VS Code grammars, single or light/dark themes
 - [x] `ctx.markdown()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`
 - [x] Images: build-time dimensions, thumbhash placeholders, `sharp` optional
@@ -53,6 +54,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 - [x] Cross-collection references with cycle detection, resolved on demand
 - [x] `ctx.cache()`, `ctx.emitFile()`, `ctx.addWatchFile()`, `ctx.skip()`
 - [x] Persistent transform cache keyed by content digest, relocatable with `--cache-dir`
+- [x] `afterBuild` — a hook with every document in hand, for search indexes, feeds and tag counts; run identically by the CLI and every integration, skipped after a failed build, and never mistaken by the watcher for a change
 
 ### Sources
 
@@ -76,13 +78,19 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 - [x] `@contentmap/next` — Turbopack **and** webpack
 - [x] `@contentmap/nuxt`, `@contentmap/astro`, `@contentmap/webpack`
 - [x] Every adapter proven against its real toolchain by an example application in CI
-- [x] CLI/plugin output parity diffed in CI
+- [x] CLI/plugin output parity diffed in CI, `afterBuild` output included
+- [x] Every adapter fails a production build on exactly what fails `contentmap build`, and reports it in dev
 
 ### Migration
 
 - [x] `@contentmap/migrate` for contentlayer2, velite and content-collections
-- [x] Contentlayer field DSL to Zod, `computedFields` to a transform, `_raw` rewritten onto the context
-- [x] A report of everything needing a human, with the exact replacement for each
+- [x] Contentlayer field DSL to Zod — nested types included — `computedFields` to a transform, `_raw` rewritten onto the context
+- [x] Configs read the way people write them: spreads, shorthands and shared definitions followed
+- [x] Imports, constants and helper functions the moved code uses, carried across
+- [x] Contentlayer's document shape kept — `body.raw`, `body.code`, `body.html` — so pages keep rendering
+- [x] Completion callbacks — contentlayer's and content-collections' `onSuccess`, velite's `complete` — become `afterBuild`
+- [x] A report of everything needing a human, with the exact replacement for each; nothing dropped silently
+- [x] Every pattern it handles has a fixture, migrated and built for real in CI
 
 ### Engineering
 
@@ -98,10 +106,10 @@ The near-term list. These are the things most likely to change someone's mind ab
 
 ### Content
 
-- [ ] **Search index generation** — emit an index consumable by Pagefind, Orama or MiniSearch without shipping the corpus
+- [ ] **Search index helpers** — first-party `afterBuild` hooks emitting an index for Pagefind, Orama or MiniSearch without shipping the corpus. Writing one by hand is already a few lines
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update
 - [ ] **Draft and preview modes** — a first-class way to include drafts in dev and exclude them in production
-- [ ] **RSS, sitemap and feed helpers** — derived from collections you already declared
+- [ ] **RSS, sitemap and feed helpers** — `afterBuild` hooks derived from collections you already declared
 
 ### Types and editors
 
