@@ -8,6 +8,7 @@ import { contentmapModule } from '../../nuxt/src/index.ts'
 import { ContentmapWebpackPlugin } from '../../webpack/src/index.ts'
 import { contentmapLoader } from '../../astro/src/index.ts'
 import { createBuilder } from '../src/builder.ts'
+import { BuildFailedError } from '../src/integration.ts'
 import { fixtureTest } from './helpers.ts'
 
 const SRC = pathToFileURL(resolve(import.meta.dirname, '../src/index.ts')).href
@@ -446,6 +447,111 @@ describe('webpack plugin', () => {
     // Three compilers, one build. contentlayer's hook fires three times.
     expect(hooks).toHaveLength(3)
   })
+})
+
+// ── the CLI's verdict, from every integration ────────────────────────────────
+describe('every integration fails where the CLI fails, and runs afterBuild alike', () => {
+  const HOOKED = CONFIG.replace(
+    'export default defineConfig({ collections: { posts } })',
+    'export default defineConfig({ collections: { posts }, afterBuild: ctx => ' +
+      "ctx.writeFile('public/titles.json', JSON.stringify(ctx.documents(posts).map(p => p.title))) })"
+  )
+
+  type Drive = (dir: string, dev: boolean, log: (text: string) => void) => Promise<unknown>
+
+  /** Each adapter, driven the way its host drives it: a production build, or dev. */
+  const drivers: Record<string, Drive> = {
+    vite: async (dir, dev, log) => {
+      const plugin = vitePlugin({ root: dir })
+      await plugin.config?.({ root: dir })
+      try {
+        await plugin.configResolved?.({
+          root: dir,
+          command: dev ? 'serve' : 'build',
+          logger: { info() {}, error: log }
+        })
+      } finally {
+        await plugin.buildEnd?.()
+      }
+    },
+    next: async (dir, dev) => {
+      const env = process.env['NODE_ENV']
+      if (dev) process.env['NODE_ENV'] = 'development'
+      try {
+        await withContentmap({}, { root: dir, watch: false, logging: false })
+      } finally {
+        process.env['NODE_ENV'] = env
+      }
+    },
+    nuxt: async (dir, dev) => {
+      const nuxt = {
+        options: { rootDir: dir, alias: {}, dev, nitro: {}, typescript: {} },
+        hook() {}
+      }
+      await contentmapModule({ watch: false }).setup({}, nuxt as never)
+    },
+    webpack: async (dir, dev) => {
+      const taps: (() => Promise<void>)[] = []
+      new ContentmapWebpackPlugin({ root: dir, watch: false }).apply({
+        options: { mode: dev ? 'development' : 'production', resolve: {} },
+        hooks: {
+          beforeCompile: { tapPromise: (_n: string, fn: () => Promise<void>) => taps.push(fn) }
+        }
+      } as never)
+      for (const tap of taps) await tap()
+    },
+    astro: async (dir, dev, log) => {
+      await contentmapLoader({ root: dir, collection: 'posts' }).load({
+        collection: 'posts',
+        store: { clear() {}, set() {} },
+        logger: { info() {}, warn: log, error: log },
+        parseData: async ({ data }) => data,
+        generateDigest: () => 'x',
+        // Astro hands a loader a watcher only in dev.
+        ...(dev ? { watcher: { on() {} } } : {})
+      })
+    }
+  }
+
+  for (const [name, drive] of Object.entries(drivers)) {
+    fixtureTest(`${name}: a production build fails on an invalid document`, async ({ fixture }) => {
+      // `contentmap build` exits 1 on this. Through the adapter, the document
+      // vanished from the site and the build reported success.
+      await seed(fixture)
+      await fixture.write('content/broken.md', '---\nheading: no title\n---\nbody')
+      await expect(drive(fixture.dir, false, () => {})).rejects.toThrow(BuildFailedError)
+    })
+
+    fixtureTest(`${name}: dev reports the failure and carries on`, async ({ fixture }) => {
+      await seed(fixture)
+      await fixture.write('content/broken.md', '---\nheading: no title\n---\nbody')
+      const output: string[] = []
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(chunk => {
+        output.push(String(chunk))
+        return true
+      })
+      try {
+        await drive(fixture.dir, true, text => output.push(text))
+      } finally {
+        stderr.mockRestore()
+      }
+      expect(output.join('\n')).toContain('broken.md')
+    })
+
+    fixtureTest(`${name}: runs afterBuild exactly as the CLI does`, async ({ fixture }) => {
+      await seed(fixture)
+      await fixture.write('contentmap.config.ts', HOOKED)
+      await drive(fixture.dir, false, () => {})
+      const viaAdapter = await readFile(join(fixture.dir, 'public/titles.json'), 'utf8')
+
+      await rm(join(fixture.dir, 'public'), { recursive: true, force: true })
+      await createBuilder({ root: fixture.dir }).build()
+      const viaCli = await readFile(join(fixture.dir, 'public/titles.json'), 'utf8')
+
+      expect(viaAdapter).toBe(viaCli)
+      expect(JSON.parse(viaAdapter)).toEqual(['A', 'B'])
+    })
+  }
 })
 
 describe('adapter lifecycles', () => {

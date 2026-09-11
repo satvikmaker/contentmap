@@ -4,7 +4,7 @@
 
 - ContentmapNuxtModule  interface ContentmapNuxtModule { (inlineOptions: NuxtModuleOptions | undefined, nuxt: NuxtLike): Promise<void>; getMeta(): ModuleMeta; meta: ModuleMeta; setup(moduleOptions: NuxtModuleOptions | undefined, nuxt: NuxtLike): Promise<void>; }
 - ModuleMeta  interface ModuleMeta { name: string; configKey: string; }
-- NuxtLike  interface NuxtLike { options: { rootDir: string; alias: Record<string, string>; _prepare?: boolean; nitro: { typescript?: { tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]>; }; }; }; }; typescript?: { tsConfig?: { compilerOptions?: { paths?: Record<string, string[]>; }; }; }; }; hook(name: string, cb: (...args: never[]) => unknown): void; callHook?(name: string, ...args: unknown[]): Promise<void>; }
+- NuxtLike  interface NuxtLike { options: { rootDir: string; alias: Record<string, string>; dev?: boolean; _prepare?: boolean; nitro: { typescript?: { tsConfig?: { include?: string[]; compilerOptions?: { paths?: Record<string, string[]>; }; }; }; }; typescript?: { tsConfig?: { compilerOptions?: { paths?: Record<string, string[]>; }; }; }; }; hook(name: string, cb: (...args: never[]) => unknown): void; callHook?(name: string, ...args: unknown[]): Promise<void>; }
 - NuxtModuleOptions  interface NuxtModuleOptions extends BuilderOptions { watch?: boolean; }
 - contentmapModule  declare function contentmapModule(options?: NuxtModuleOptions): ContentmapNuxtModule;
 - default  module: ContentmapNuxtModule

@@ -1,4 +1,10 @@
-import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
+import {
+  BuildFailedError,
+  createBuilder,
+  formatDiagnostics,
+  type Builder,
+  type BuilderOptions
+} from 'contentmap'
 
 interface CompilerLike {
   options?: {
@@ -68,10 +74,28 @@ export class ContentmapWebpackPlugin {
           // at a directory that was never written fails as "Module not found",
           // naming nothing.
           created.generated = (await builder.resolve()).output.dir
+          const development = compiler.options?.mode === 'development'
           // Awaited, unlike contentlayer's fire-and-forget dev path, which is
           // why its first dev render could show stale or missing data.
-          await builder.build()
-          if (watch && compiler.options?.mode === 'development') await builder.watch()
+          const result = await builder.build()
+          if (result.errors > 0) {
+            // A production compile fails on exactly what makes `contentmap
+            // build` exit 1; development reports and keeps watching, as
+            // `contentmap dev` does.
+            if (!development) throw new BuildFailedError(result)
+            process.stderr.write(`${formatDiagnostics(result)}\n`)
+          }
+          if (watch && development) {
+            // A late subscriber is replayed the first build, reported above.
+            let live = false
+            builder.on(event => {
+              if (live && event.type === 'build:end' && event.result.errors > 0) {
+                process.stderr.write(`${formatDiagnostics(event.result)}\n`)
+              }
+            })
+            live = true
+            await builder.watch()
+          }
         })()
         session = created
         ContentmapWebpackPlugin.#sessions.set(key, created)

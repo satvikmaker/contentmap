@@ -1,4 +1,10 @@
-import { createBuilder, type BuildResult, type BuilderOptions } from 'contentmap'
+import {
+  BuildFailedError,
+  createBuilder,
+  formatDiagnostics,
+  type BuildResult,
+  type BuilderOptions
+} from 'contentmap'
 
 export interface NextPluginOptions extends BuilderOptions {
   /** Watch during `next dev`. Default true. */
@@ -45,6 +51,9 @@ export function withContentmap(
     ? (started.get(key) ??
       (() => {
         const promise = run(builderOptions, { watch, logging })
+        // Marked handled so a config nobody awaits cannot crash the process
+        // with an unhandled rejection. Next awaits it, and sees the failure.
+        promise.catch(() => undefined)
         started.set(key, promise)
         return promise
       })())
@@ -96,19 +105,29 @@ async function run(
   { watch, logging }: { watch: boolean; logging: boolean }
 ): Promise<BuildResult> {
   const builder = createBuilder(builderOptions)
-  if (logging) {
-    builder.on(event => {
-      if (event.type === 'build:end' && event.result.errors === 0) {
-        process.stderr.write(
-          `contentmap: ${event.result.documents} document(s) in ${Math.round(event.result.durationMs)}ms\n`
-        )
-      }
-    })
-  }
+  const dev = process.env['NODE_ENV'] === 'development'
+  builder.on(event => {
+    if (event.type !== 'build:end') return
+    if (event.result.errors > 0) {
+      // In dev this is the only place a failed build is reported. A
+      // production build throws below instead, with the same report.
+      if (dev) process.stderr.write(`${formatDiagnostics(event.result)}\n`)
+    } else if (logging) {
+      process.stderr.write(
+        `contentmap: ${event.result.documents} document(s) in ${Math.round(event.result.durationMs)}ms\n`
+      )
+    }
+  })
 
   const result = await builder.build()
+  if (result.errors > 0 && !dev) {
+    // `next build` fails on exactly what makes `contentmap build` exit 1.
+    // Without this an invalid document simply vanished from the site.
+    await builder.close()
+    throw new BuildFailedError(result)
+  }
 
-  if (watch && process.env['NODE_ENV'] === 'development') {
+  if (watch && dev) {
     await builder.watch()
     const stop = () => void builder.close()
     process.once('SIGINT', stop)

@@ -1,4 +1,10 @@
-import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
+import {
+  BuildFailedError,
+  createBuilder,
+  formatDiagnostics,
+  type Builder,
+  type BuilderOptions
+} from 'contentmap'
 
 /**
  * Structural types for the Nuxt objects used here.
@@ -9,6 +15,8 @@ export interface NuxtLike {
   options: {
     rootDir: string
     alias: Record<string, string>
+    /** True under `nuxt dev`. */
+    dev?: boolean
     /** True during `nuxt prepare`: generate types, build nothing. */
     _prepare?: boolean
     nitro: {
@@ -90,7 +98,18 @@ export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNux
       const nitroCompiler = (nitroConfig.compilerOptions ??= {})
       nitroCompiler.paths = { ...nitroCompiler.paths, ...paths }
 
-      await builder.build()
+      const result = await builder.build()
+      if (result.errors > 0) {
+        // `nuxt build` fails on exactly what makes `contentmap build` exit 1.
+        // `nuxt prepare` only generates types — failing it would break every
+        // install that runs it — and dev reports and carries on, as
+        // `contentmap dev` does.
+        if (!nuxt.options.dev && !nuxt.options._prepare) {
+          await builder.close()
+          throw new BuildFailedError(result)
+        }
+        process.stderr.write(`${formatDiagnostics(result)}\n`)
+      }
 
       // `nuxt prepare` exists to produce types without building. Starting a
       // watcher there leaves the command hanging.
@@ -103,6 +122,14 @@ export function contentmapModule(options: NuxtModuleOptions = {}): ContentmapNux
         nuxt.hook('close', (async () => {
           await builder.close()
         }) as never)
+        // A late subscriber is replayed the first build, reported above.
+        let live = false
+        builder.on(event => {
+          if (live && event.type === 'build:end' && event.result.errors > 0) {
+            process.stderr.write(`${formatDiagnostics(event.result)}\n`)
+          }
+        })
+        live = true
         await builder.watch()
       } else {
         await builder.close()

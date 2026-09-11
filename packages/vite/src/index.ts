@@ -1,5 +1,12 @@
 import { fileURLToPath } from 'node:url'
-import { createBuilder, type Builder, type BuilderOptions } from 'contentmap'
+import {
+  BuildFailedError,
+  createBuilder,
+  formatDiagnostics,
+  type Builder,
+  type BuilderOptions,
+  type BuildResult
+} from 'contentmap'
 
 /**
  * Minimal structural types for the Vite objects we touch.
@@ -16,13 +23,19 @@ interface ViteServerLike {
   }
   ws?: { send(payload: { type: string; path?: string }): void }
   hot?: { send(payload: { type: string; path?: string }): void }
-  config?: { logger?: { info(msg: string): void } }
+  config?: { logger?: LoggerLike }
+}
+
+interface LoggerLike {
+  info(msg: string): void
+  error?(msg: string): void
 }
 
 interface ResolvedViteConfig {
   root: string
   command: 'build' | 'serve'
   server?: { fs?: { allow?: string[] } }
+  logger?: LoggerLike
 }
 
 export interface ContentmapPluginOptions extends BuilderOptions {
@@ -64,7 +77,10 @@ export interface VitePluginLike {
  * which calls this factory twice and produces two independent instances. Only
  * module state spans them.
  */
-const sessions = new Map<string, { builder: Builder; build: Promise<void>; refs: number }>()
+const sessions = new Map<
+  string,
+  { builder: Builder; build: Promise<BuildResult>; refs: number; reported: boolean }
+>()
 
 export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLike {
   const { isEnabled, logging = true, ...builderOptions } = options
@@ -140,15 +156,27 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
       const key = sessionKey
       const session = sessions.get(key) ?? {
         builder,
-        build: builder.build().then(() => undefined),
-        refs: 0
+        build: builder.build(),
+        refs: 0,
+        reported: false
       }
       sessions.set(key, session)
       if (!held) {
         session.refs += 1
         held = true
       }
-      await session.build
+      const result = await session.build
+      if (result.errors > 0) {
+        // `vite build` fails on exactly what makes `contentmap build` exit 1.
+        // Without this an invalid document simply vanished from the site, and
+        // the build reported success.
+        if (config.command === 'build') throw new BuildFailedError(result)
+        // Every environment awaits the same build; one report is enough.
+        if (!session.reported) {
+          session.reported = true
+          report(config.logger, result)
+        }
+      }
     },
 
     async configureServer(server: ViteServerLike) {
@@ -162,15 +190,21 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
       )
       const handle = await builder.watch(usable ? { watcher: server.watcher as never } : {})
 
+      // A late subscriber is replayed the first build, whose errors
+      // configResolved already reported. Only rebuilds from here are news.
+      let live = false
       builder.on(event => {
         if (event.type !== 'build:end') return
-        if (logging && event.result.errors === 0) {
+        if (event.result.errors > 0) {
+          if (live) report(server.config?.logger, event.result)
+        } else if (logging) {
           server.config?.logger?.info(
             `contentmap: ${event.result.documents} document(s) in ${Math.round(event.result.durationMs)}ms`
           )
         }
         invalidate(server, generatedDir)
       })
+      live = true
 
       const stop = () => void handle.close()
       process.once('SIGINT', stop)
@@ -192,6 +226,13 @@ export function contentmap(options: ContentmapPluginOptions = {}): VitePluginLik
     }
   }
   return plugin
+}
+
+/** Print a failed build where the host prints its own errors. */
+function report(logger: LoggerLike | undefined, result: BuildResult): void {
+  const text = formatDiagnostics(result)
+  if (logger?.error) logger.error(text)
+  else process.stderr.write(`${text}\n`)
 }
 
 /**

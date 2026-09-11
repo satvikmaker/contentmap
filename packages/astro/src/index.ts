@@ -1,4 +1,10 @@
-import { createBuilder, type AnyDocument, type BuilderOptions } from 'contentmap'
+import {
+  BuildFailedError,
+  createBuilder,
+  formatDiagnostics,
+  type AnyDocument,
+  type BuilderOptions
+} from 'contentmap'
 
 /** The slice of Astro's loader context this loader uses. */
 export interface AstroLoaderContext {
@@ -9,7 +15,7 @@ export interface AstroLoaderContext {
     clear(): void
     set(entry: { id: string; data: Record<string, unknown>; body?: string; digest?: string }): void
   }
-  logger: { info(msg: string): void; warn(msg: string): void }
+  logger: { info(msg: string): void; warn(msg: string): void; error?(msg: string): void }
   parseData(input: { id: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>
   generateDigest(data: Record<string, unknown> | string): string
   watcher?: { on(event: string, cb: (path: string) => void): void }
@@ -68,10 +74,15 @@ export function contentmapLoader(options: AstroLoaderOptions = {}): ContentmapAs
       const session = await acquire(builderOptions, Boolean(context.refreshContextData))
 
       const result = await session.build.then(() => session.last!)
-      for (const diagnostic of result.diagnostics) {
-        if (diagnostic.severity === 'error') {
-          context.logger.warn(`${diagnostic.file ?? ''} ${diagnostic.message}`.trim())
-        }
+      if (result.errors > 0) {
+        // `astro build` fails on exactly what makes `contentmap build` exit 1;
+        // this used to warn and carry on, so an invalid document vanished from
+        // the site. Astro hands a loader a watcher only in dev, which reports
+        // and carries on, as `contentmap dev` does.
+        if (context.watcher === undefined) throw new BuildFailedError(result)
+        const report = formatDiagnostics(result)
+        if (context.logger.error) context.logger.error(report)
+        else context.logger.warn(report)
       }
 
       const documents = session.builder.documentsOf(name)
