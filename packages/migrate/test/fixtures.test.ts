@@ -272,6 +272,39 @@ describe('content-collections spreads', () => {
   })
 })
 
+describe('completion callbacks', () => {
+  it("turns contentlayer's onSuccess into afterBuild, handed the importData it expects", () => {
+    const result = fixture('contentlayer-on-success')
+    expect(result.config).toContain('afterBuild: async ctx => {')
+    expect(result.config).toContain(
+      "const importData = async () => ({ allPosts: ctx.documents('posts') })"
+    )
+    // The body is untouched, down to the destructuring.
+    expect(result.config).toContain('const { allPosts } = await importData()')
+    // The helper, and the fs imports the body uses, come along.
+    expect(result.config).toContain('function countTags(posts) {')
+    expect(result.config).toContain("import { mkdirSync, writeFileSync } from 'node:fs'")
+    expect(note(result, 'onSuccess')?.message).toContain('afterBuild')
+  })
+
+  it("turns velite's complete into afterBuild, and reports prepare", () => {
+    const result = fixture('velite-complete')
+    expect(result.config).toContain("const data = { posts: ctx.documents('posts') }")
+    expect(result.config).toContain("await mkdir('generated', { recursive: true })")
+    // prepare changed output before it was written; there is no hook there.
+    expect(note(result, 'prepare')?.kind).toBe('manual')
+    expect(result.config).not.toContain('Injected')
+  })
+
+  it('turns each content-collections onSuccess into its own hook', () => {
+    const result = fixture('content-collections-on-success')
+    expect(result.config).toContain('afterBuild: [')
+    expect(result.config).toContain("const docs = ctx.documents('posts')")
+    expect(result.config).toContain("const docs = ctx.documents('pages')")
+    expect(result.notes.some(n => n.kind === 'unsupported')).toBe(false)
+  })
+})
+
 describe('every fixture', () => {
   it.each(readdirSync(FIXTURES))('%s parses, and imports nothing from the old tool', name => {
     const { config } = fixture(name)

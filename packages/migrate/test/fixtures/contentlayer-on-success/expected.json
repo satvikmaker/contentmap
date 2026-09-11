@@ -1,0 +1,9 @@
+{
+  "posts": {
+    "a": { "title": "A" },
+    "b": { "title": "B" }
+  },
+  "$files": {
+    "generated/tag-data.json": "{\"x\":2,\"y\":1}"
+  }
+}

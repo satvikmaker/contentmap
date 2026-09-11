@@ -1,6 +1,19 @@
 import { pluralize } from 'inflection'
 import { isBoundWithin, isReference, topLevelBindings } from '../carry.ts'
-import { propertyKey, reindent, type CollectionPlan, type EmitPlan, type Import } from '../emit.ts'
+import {
+  propertyKey,
+  reindent,
+  type CollectionPlan,
+  type ConfigProp,
+  type EmitPlan,
+  type Import
+} from '../emit.ts'
+import {
+  afterBuildValue,
+  callable as callableNode,
+  objectLiteral,
+  type HookSource
+} from '../hook.ts'
 import {
   booleanOf,
   callsTo,
@@ -161,7 +174,7 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
   const collections: CollectionPlan[] = []
   const carry: ts.Node[] = []
   const install = new Set<string>()
-  const configProps: string[] = []
+  const configProps: ConfigProp[] = []
 
   const source = callsTo(file, 'makeSource')[0]
   // `makeSource({ … })`, `makeSource(options)` and `makeSource(async () => ({ … }))`.
@@ -186,6 +199,8 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
   const locals = localsFor(file)
   const exclude = contentDirExclude(file, options, notes)
   const contentTypes = new Set<ContentType>()
+  /** contentlayer's export for each type — `allBlogs` — and the collection replacing it. */
+  const exported: [string, string][] = []
 
   for (const entry of documentTypes(file, options, notes)) {
     const object = resolveObject(file, entry)
@@ -202,6 +217,7 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
     const typeName = stringOf(prop(object, 'name')) ?? 'Document'
     const key = collectionKey(typeName)
     const plan: CollectionPlan = { key, name: key, typeName, directory: contentDir, fields: [] }
+    exported.push([exportName(typeName), key])
     const sink: Sink = { key, notes, carry, install }
 
     const pattern = prop(object, 'filePathPattern')
@@ -290,6 +306,41 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
     configProps.push(`renderer: unifiedRenderer(${renderer})`)
   }
   configProps.push(...policies(options, notes))
+
+  // onSuccess did its work — a tag count, a search index — once the data was
+  // generated, fetching it through `importData()`. afterBuild runs at the same
+  // point, so the callback is kept as written and handed an importData that
+  // returns contentmap's documents under the names contentlayer exported.
+  const onSuccess = options && prop(options, 'onSuccess')
+  if (onSuccess) {
+    carry.push(onSuccess)
+    const everything = /\ballDocuments\b/.test(text(onSuccess))
+    const source: HookSource = {
+      fn: onSuccess,
+      comment: "contentlayer's importData(), rebuilt from contentmap's documents",
+      argument: (names, ctx) => {
+        const of = (key: string) => `${ctx}.documents('${names.get(key) ?? key}')`
+        const entries: [string, string][] = exported.map(([all, key]) => [all, of(key)])
+        if (everything) {
+          entries.push([
+            'allDocuments',
+            `[${exported.map(([, key]) => `...${of(key)}`).join(', ')}]`
+          ])
+        }
+        return `async () => (${objectLiteral(entries)})`
+      }
+    }
+    configProps.push(names => `afterBuild: ${afterBuildValue([source], names)}`)
+    notes.push({
+      kind: 'review',
+      subject: 'onSuccess',
+      message: 'became `afterBuild`, called with the `importData()` it expects',
+      hint:
+        "Its documents are contentmap's: `_raw` and `_id` live on `_meta` now " +
+        '(`_raw.flattenedPath` is `_meta.path`). `writeFileSync` still works; `ctx.writeFile` ' +
+        'also skips unchanged files and never triggers a rebuild.'
+    })
+  }
   otherOptions(file, options, notes)
 
   return { imports, collections, configProps, notes, carry, install: [...install] }
@@ -306,6 +357,12 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
 function collectionKey(typeName: string): string {
   const plural = pluralize(typeName)
   return plural.charAt(0).toLowerCase() + plural.slice(1)
+}
+
+/** What contentlayer exported a type as: `all` + its plural, first letter raised. */
+function exportName(typeName: string): string {
+  const plural = pluralize(typeName)
+  return `all${plural.charAt(0).toUpperCase()}${plural.slice(1)}`
 }
 
 function documentTypes(
@@ -808,17 +865,7 @@ function awaitOf(node: ts.Expression, code: string): string {
 
 /** A resolver as something that can be called, whatever form it was written in. */
 function callable(resolver: ts.Expression): string {
-  const node = (unwrap(resolver) ?? resolver) as ts.Node
-  if (ts.isMethodDeclaration(node)) {
-    // `resolve(doc) { … }` is a method; lifted out of its object it has to
-    // become a function expression, or the output does not parse.
-    const isAsync = node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ? 'async ' : ''
-    const params = node.parameters.map(p => p.getText()).join(', ')
-    const returns = node.type ? `: ${node.type.getText()}` : ''
-    return `(${isAsync}function (${params})${returns} ${node.body?.getText() ?? '{}'})`
-  }
-  if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) return node.getText()
-  return `(${node.getText()})`
+  return callableNode((unwrap(resolver) ?? resolver) as ts.Node)
 }
 
 /** The object contentlayer passed to `resolve`, rebuilt from contentmap's context. */
@@ -990,15 +1037,11 @@ const HANDLED = new Set([
   'markdown',
   'mdx',
   'onExtraFieldData',
-  'onMissingOrIncompatibleData'
+  'onMissingOrIncompatibleData',
+  'onSuccess'
 ])
 
 const OTHER: Record<string, Pick<Note, 'kind' | 'message' | 'hint'>> = {
-  onSuccess: {
-    kind: 'unsupported',
-    message: 'no build completion hook',
-    hint: 'Not carried over.'
-  },
   disableImportAliasWarning: {
     kind: 'review',
     message: 'dropped — there is no import alias warning to disable'

@@ -9,7 +9,8 @@ import {
   text,
   ts
 } from '../ts.ts'
-import type { CollectionPlan, EmitPlan } from '../emit.ts'
+import { propertyKey, type CollectionPlan, type ConfigProp, type EmitPlan } from '../emit.ts'
+import { afterBuildValue, objectLiteral, type HookSource } from '../hook.ts'
 import type { Note } from '../types.ts'
 
 /**
@@ -184,8 +185,6 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
   for (const [key, message] of [
     ['markdown', 'markdown options move to the renderer you register'],
     ['mdx', 'MDX options move to `mdx()` from @contentmap/mdx'],
-    ['prepare', 'no global prepare hook'],
-    ['complete', 'no global complete hook'],
     ['loaders', 'contentmap calls these parsers; register them with defineParser']
   ] as const) {
     if (configObject && prop(configObject, key)) {
@@ -198,12 +197,60 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
     }
   }
 
+  const configProps: ConfigProp[] = []
+
+  // complete runs once the build is done, handed every collection's documents
+  // — exactly afterBuild's moment — so it is kept as written and given them.
+  const complete = configObject && prop(configObject, 'complete')
+  if (complete) {
+    context.carry.push(complete)
+    const keys = collections.map(c => c.key)
+    const source: HookSource = {
+      fn: complete,
+      comment: "velite's collections, rebuilt from contentmap's documents",
+      argument: (names, ctx) =>
+        objectLiteral(
+          keys.map(key => [propertyKey(key), `${ctx}.documents('${names.get(key) ?? key}')`])
+        )
+    }
+    configProps.push(names => `afterBuild: ${afterBuildValue([source], names)}`)
+    notes.push({
+      kind: 'review',
+      subject: 'complete',
+      message: 'became `afterBuild`, called with the collections it expects',
+      hint: '`ctx.writeFile` also skips unchanged files and never triggers a rebuild.'
+    })
+    const fn = (complete as { parameters?: ts.NodeArray<ts.ParameterDeclaration> }).parameters
+    if (fn && fn.length > 1) {
+      notes.push({
+        kind: 'manual',
+        subject: 'complete',
+        message: "its second argument — velite's resolved config — has no equivalent",
+        hint: 'Read what it needs from your own config module instead.'
+      })
+    }
+  }
+
+  // prepare ran before output was written, and could change it or suppress
+  // it. Nothing in contentmap runs at that point, so it cannot simply move.
+  if (configObject && prop(configObject, 'prepare')) {
+    notes.push({
+      kind: 'manual',
+      subject: 'prepare',
+      message: 'ran before output was written and could change it; contentmap has no hook there',
+      hint:
+        "Move changes to documents into each collection's `transform`. If it only wrote files, " +
+        'it belongs in `afterBuild`.'
+    })
+  }
+
   return {
     imports: [
       { module: 'contentmap', names: ['defineCollection', 'defineConfig'] },
       { module: 'zod', names: ['z'] }
     ],
     collections,
+    configProps,
     notes,
     carry: context.carry,
     install: [...context.install],

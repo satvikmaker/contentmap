@@ -262,10 +262,28 @@ for (const name of (await readdir(fixtures)).sort()) {
       continue
     }
 
-    const expected = JSON.parse(await readFile(join(source, 'expected.json'), 'utf8'))
-    const builder = createBuilder({ root })
-    await builder.build()
+    const { $files: files = {}, ...expected } = JSON.parse(
+      await readFile(join(source, 'expected.json'), 'utf8')
+    )
     const problems = []
+
+    // Files a hook wrote, checked first: the CLI build above is the one that
+    // has to have produced them.
+    for (const [path, content] of Object.entries(files)) {
+      const written = await readFile(join(root, path), 'utf8').catch(() => undefined)
+      await check(written, content, path, problems)
+    }
+
+    // Hooks write relative to the working directory, as they did under the
+    // old tool, so build from the project the way a user would.
+    const cwd = process.cwd()
+    process.chdir(root)
+    const builder = createBuilder({ root })
+    try {
+      await builder.build()
+    } finally {
+      process.chdir(cwd)
+    }
     for (const [collection, documents] of Object.entries(expected)) {
       const byId = new Map(builder.documentsOf(collection).map(doc => [doc._meta.id, doc]))
       for (const [id, fields] of Object.entries(documents)) {

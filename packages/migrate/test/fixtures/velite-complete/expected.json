@@ -1,0 +1,4 @@
+{
+  "posts": { "posts/a": { "title": "A" } },
+  "$files": { "generated/titles.json": "[\"A\"]" }
+}

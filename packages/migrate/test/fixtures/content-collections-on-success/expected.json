@@ -1,0 +1,8 @@
+{
+  "posts": { "a": { "title": "A" }, "b": { "title": "B" } },
+  "pages": { "about": { "title": "About" } },
+  "$files": {
+    "generated/count.txt": "2",
+    "generated/pages.txt": "About"
+  }
+}

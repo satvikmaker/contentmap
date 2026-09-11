@@ -9,7 +9,8 @@ import {
   text,
   ts
 } from '../ts.ts'
-import type { CollectionPlan, EmitPlan } from '../emit.ts'
+import type { CollectionPlan, ConfigProp, EmitPlan } from '../emit.ts'
+import { afterBuildValue, type HookSource } from '../hook.ts'
 import type { Note } from '../types.ts'
 
 /**
@@ -25,6 +26,7 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
   const notes: Note[] = []
   const collections: CollectionPlan[] = []
   const carry: ts.Node[] = []
+  const hooks: HookSource[] = []
 
   const configCall = callsTo(file, 'defineConfig')[0]
   const configObject = configCall ? resolveObject(file, configCall.arguments[0]) : undefined
@@ -123,13 +125,23 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
       })
     }
 
-    if (prop(object, 'onSuccess')) {
+    // onSuccess ran once the collection was written, handed its documents.
+    // afterBuild runs once everything is written, so each one becomes a hook
+    // handed the same collection.
+    const onSuccess = prop(object, 'onSuccess')
+    if (onSuccess) {
+      carry.push(onSuccess)
+      hooks.push({
+        fn: onSuccess,
+        comment: `the ${key} documents content-collections passed to onSuccess`,
+        argument: (names, ctx) => `${ctx}.documents('${names.get(key) ?? key}')`
+      })
       notes.push({
-        kind: 'unsupported',
+        kind: 'review',
         collection: key,
         subject: 'onSuccess',
-        message: 'contentmap has no per-collection completion hook',
-        hint: 'Run the work after `contentmap build` instead, or from your own script.'
+        message: "became an `afterBuild` hook, called with this collection's documents",
+        hint: 'It now runs once every collection is written, rather than just this one.'
       })
     }
 
@@ -153,12 +165,18 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
     })
   }
 
+  const configProps: ConfigProp[] = []
+  if (hooks.length > 0) {
+    configProps.push(names => `afterBuild: ${afterBuildValue(hooks, names)}`)
+  }
+
   return {
     imports: [
       { module: 'contentmap', names: ['defineCollection', 'defineConfig'] },
       { module: 'zod', names: ['z'] }
     ],
     collections,
+    configProps,
     notes,
     carry
   }

@@ -36,13 +36,15 @@ These are exact equivalents, which is what makes rewriting them automatically sa
 
 Two differences are reported rather than papered over. Date fields become real `Date`s where contentlayer returned ISO strings, and the report gives the one-line change that keeps the string. And contentmap fails the build on an invalid document where contentlayer skipped it with a warning; the report says how to keep the old behaviour.
 
+**Completion callbacks** — contentlayer's `onSuccess(importData)`, velite's `complete(data)` and content-collections' per-collection `onSuccess(docs)` — become contentmap's [`afterBuild`](https://github.com/satvikmaker/contentmap#after-the-build), kept exactly as written and handed the argument they expected, rebuilt from contentmap's documents. A tag-count or search-index file written there keeps being written, by the CLI and every framework integration alike.
+
 **velite**'s `s` is zod plus about a dozen helpers. Plain zod passes straight through, chained methods and all, and so do schema fragments declared elsewhere in the file. `s.isodate()` becomes `z.coerce.date()`. The helpers that are build-time work rather than validation — `s.markdown()`, `s.image()`, `s.excerpt()`, `s.toc()`, `s.metadata()` — are reported with the transform that replaces each one.
 
 **content-collections** is closest: both tools validate with a Standard Schema and spell a collection the same way, so the schema is lifted rather than rebuilt, along with any shared schema or helper it names. The array of collections becomes an object, and `doc._meta` moves to `ctx.meta` — contentmap validates first and passes only the schema's own output, so `_meta` lives on the context. If your transform did not take a context parameter, it gets one.
 
 ## What it will not do
 
-- **Convert build hooks.** `onSuccess`, `prepare`, `complete` and `hooks` have no equivalent; run that work around `contentmap build`
+- **Convert velite's `prepare`.** It ran before output was written and could change it; contentmap has no hook at that point. The report says where each part belongs — changes to documents in `transform`, anything else in `afterBuild`
 - **Bundle imports inside MDX files.** contentlayer used mdx-bundler; `@contentmap/mdx` compiles each file on its own, so pass components when rendering
 - **Follow code into other files.** A spread of an object imported from another module is reported, not read
 - **Touch your components.** Only the config is translated. Imports in your app still point at the old package

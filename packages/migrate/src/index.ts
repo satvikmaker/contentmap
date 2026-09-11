@@ -80,11 +80,15 @@ export function migrate(
     to: options.outFile === undefined ? from : dirname(resolve(options.outFile))
   })
   for (const { name, module } of carried.unresolved) plan.notes.push(unresolved(name, module))
+  // Normalising can rename a collection; anything emitted that mentions one
+  // by name is written against the name it ends up with.
+  const originals = plan.collections.map(c => c.key)
   plan.notes.push(...normalizePlan(plan, carried.names))
+  const names = new Map(originals.map((key, i) => [key, plan.collections[i]?.key ?? key]))
 
   return {
     tool,
-    config: emitConfig(plan, carried),
+    config: emitConfig(plan, carried, names),
     collections: plan.collections.map(c => c.key),
     notes: plan.notes,
     install: [...new Set([...ALWAYS, ...(plan.install ?? [])])]

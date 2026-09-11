@@ -32,11 +32,18 @@ export interface Import {
   names: string[]
 }
 
+/**
+ * A property of `defineConfig`, formatted as `key: value` — or a function
+ * producing one from the final collection names, for a value that mentions a
+ * collection whose name normalising may yet change.
+ */
+export type ConfigProp = string | ((names: ReadonlyMap<string, string>) => string)
+
 export interface EmitPlan {
   imports: Import[]
   collections: CollectionPlan[]
-  /** Extra properties on defineConfig, already formatted as `key: value`. */
-  configProps?: string[]
+  /** Extra properties on defineConfig. */
+  configProps?: ConfigProp[]
   notes: Note[]
   /**
    * Source nodes whose text the plan emits. Whatever they refer to at the top
@@ -205,7 +212,11 @@ export function normalizePlan(plan: EmitPlan, reserved: ReadonlySet<string> = ne
  * the user reads after migrating, and it has to look like something a person
  * wrote. A generated-looking config invites a rewrite, which defeats the point.
  */
-export function emitConfig(plan: EmitPlan, carried?: Carried): string {
+export function emitConfig(
+  plan: EmitPlan,
+  carried?: Carried,
+  names: ReadonlyMap<string, string> = new Map(plan.collections.map(c => [c.key, c.key]))
+): string {
   const out: string[] = []
   for (const { module, names } of plan.imports) {
     // Carried code that binds the same name wins: a config written against
@@ -257,7 +268,10 @@ export function emitConfig(plan: EmitPlan, carried?: Carried): string {
   }
 
   const keys = plan.collections.map(c => c.key)
-  const props = [`collections: { ${keys.join(', ')} }`, ...(plan.configProps ?? [])]
+  const props = [
+    `collections: { ${keys.join(', ')} }`,
+    ...(plan.configProps ?? []).map(prop => (typeof prop === 'function' ? prop(names) : prop))
+  ]
   const inline = `export default defineConfig({ ${props.join(', ')} })`
   if (inline.length <= 100 && !inline.includes('\n')) {
     out.push(inline)
