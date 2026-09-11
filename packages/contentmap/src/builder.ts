@@ -6,7 +6,8 @@ import {
   findKeyPosition,
   normalizeParserError
 } from './diagnostics/index.ts'
-import { resolveConfig } from './config/resolve.ts'
+import { collectionNameOf, resolveConfig } from './config/resolve.ts'
+import { runAfterBuild } from './hooks.ts'
 import { collectFiles, metaFor, type PreviousState, type SourceFile } from './collect/read.ts'
 import { resolveParser } from './parsers/index.ts'
 import { validate } from './validate/standard.ts'
@@ -140,6 +141,8 @@ export class Builder {
   #forced: ReadonlySet<string> | undefined
   #refreshContext: Record<string, unknown> | undefined
   #watchHandle: WatchHandle | undefined
+  /** Files afterBuild hooks wrote, which the watcher must not react to. */
+  #hookOutputs = new Set<string>()
   /** Aborted on close; replaced per build so a closed builder can be reused. */
   #abort = new AbortController()
   #logger: Logger = {
@@ -268,6 +271,29 @@ export class Builder {
     await emitBarrel(config, stats)
     await emitTypes(config, stats)
 
+    // Hooks see a finished build: every module written, every asset copied.
+    // Not after a failed one — a search index over whichever documents
+    // survived is wrong without saying so — and not under `check`, which
+    // writes nothing.
+    if (config.afterBuild.length > 0 && !config.dryRun && diagnostics.errors === 0) {
+      await this.#time('afterBuild', () =>
+        runAfterBuild({
+          config,
+          documents: name => this.documentsOf(name),
+          nameOf: ref => {
+            const name = collectionNameOf(ref)
+            if (name === undefined || !config.collections[name]) {
+              throw new UnknownCollectionError(name ?? '', Object.keys(config.collections))
+            }
+            return name
+          },
+          logger: this.#logger,
+          written: this.#hookOutputs,
+          diagnostics
+        })
+      )
+    }
+
     for (const d of diagnostics.items) this.#emit({ type: 'diagnostic', diagnostic: d })
 
     const result: BuildResult = {
@@ -307,6 +333,7 @@ export class Builder {
       config,
       {
         logger: this.#logger,
+        isOutput: path => this.#isHookOutput(path),
         rebuild: async (changed, reason) => {
           this.#emit({ type: 'watch:change', path: reason })
           // An external file names no document, so there is no per-document
@@ -371,6 +398,19 @@ export class Builder {
   documentsOf(collection: string): AnyDocument[] {
     const built = this.#built.get(collection) ?? { entries: this.#cache.get(collection) ?? [] }
     return built.entries.map(toDocument)
+  }
+
+  /**
+   * A file an afterBuild hook wrote — or the temporary file it wrote first.
+   *
+   * The temporary file matters as much as the real one: it appears and
+   * disappears on every write that changed anything, which is exactly the
+   * write a loop is made of.
+   */
+  #isHookOutput(path: string): boolean {
+    if (this.#hookOutputs.has(path)) return true
+    const tmp = /\.\d+\.\d+\.tmp$/.exec(path)
+    return tmp !== null && this.#hookOutputs.has(path.slice(0, tmp.index))
   }
 
   /** Names of the collections the last build produced. */
@@ -1074,7 +1114,7 @@ export class Builder {
     const targetOf = async (
       ref: CollectionRef
     ): Promise<{ name: string; result: CollectionResult }> => {
-      const name = typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+      const name = collectionNameOf(ref) ?? ''
       if (!name || !config.collections[name]) {
         throw new UnknownCollectionError(String(name), Object.keys(config.collections))
       }
@@ -1119,7 +1159,7 @@ export class Builder {
         return all.filter(d => d._meta.id !== documentMeta.id)
       },
       documents: async ref => {
-        const requested = typeof ref === 'string' ? ref : ((ref as { name?: string }).name ?? '')
+        const requested = collectionNameOf(ref) ?? ''
         if (requested === collection.name) {
           throw new SelfReferenceError(collection.name)
         }

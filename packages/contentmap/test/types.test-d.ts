@@ -47,6 +47,40 @@ describe('serializability is enforced at compile time', () => {
   })
 })
 
+describe('afterBuild', () => {
+  const posts = defineCollection({
+    name: 'posts',
+    directory: 'content',
+    include: '**/*.md',
+    schema: z.object({ title: z.string(), date: z.coerce.date() })
+  })
+
+  it('types documents by the definition passed in', () => {
+    defineConfig({
+      collections: { posts },
+      afterBuild: ctx => {
+        const [first] = ctx.documents(posts)
+        expectTypeOf(first!.title).toEqualTypeOf<string>()
+        expectTypeOf(first!.date).toEqualTypeOf<Date>()
+        expectTypeOf(first!._meta).toEqualTypeOf<DocumentMeta>()
+        // A name cannot carry a type, so it degrades to a loose document.
+        expectTypeOf(ctx.documents('posts')).toEqualTypeOf<AnyDocument[]>()
+        expectTypeOf(ctx.writeFile).returns.resolves.toEqualTypeOf<string>()
+      }
+    })
+  })
+
+  it('takes several hooks, sync or async', () => {
+    defineConfig({ collections: { posts }, afterBuild: [() => {}, async () => {}] })
+  })
+
+  it('takes a hook that returns something, as a concise arrow does', () => {
+    // `ctx => ctx.writeFile(…)` returns Promise<string>. A return type of
+    // Promisable<void> rejected it, and `next build` failed on the example.
+    defineConfig({ collections: { posts }, afterBuild: ctx => ctx.writeFile('search.json', '[]') })
+  })
+})
+
 describe('reference inference', () => {
   const authors = defineCollection({
     name: 'authors',
@@ -67,6 +101,32 @@ describe('reference inference', () => {
 
   it('falls back to a loose document when a collection is named as a string', () => {
     expectTypeOf<DocumentOf<'authors'>>().toEqualTypeOf<AnyDocument>()
+  })
+
+  it('accepts a definition with a transform wherever a collection is expected', () => {
+    // It was typed CollectionDefinition<never, never>, which a transformed
+    // definition is not assignable to. The test above only ever looked at
+    // DocumentOf directly, so the call itself went untested until a real
+    // `next build` of an example refused to compile.
+    defineCollection({
+      name: 'posts',
+      directory: 'content/posts',
+      include: '**/*.md',
+      schema: z.object({ author: z.string() }),
+      transform: async (doc, ctx) => {
+        const author = await ctx.resolve(authors, doc.author)
+        expectTypeOf(author.initials).toEqualTypeOf<string>()
+        const all = await ctx.documents(authors)
+        expectTypeOf(all[0]!.initials).toEqualTypeOf<string>()
+        return doc
+      }
+    })
+    defineConfig({
+      collections: { authors },
+      afterBuild: ctx => {
+        expectTypeOf(ctx.documents(authors)[0]!.initials).toEqualTypeOf<string>()
+      }
+    })
   })
 })
 

@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises'
 import { availableParallelism } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type {
+  AfterBuildHook,
   BuilderOptions,
   CollectionDefinition,
   ResolvedConfig,
@@ -136,8 +137,45 @@ export async function resolveConfig(options: BuilderOptions = {}): Promise<Resol
     concurrency: options.concurrency ?? user.concurrency ?? availableParallelism(),
     readConcurrency: user.readConcurrency ?? 64,
     onValidationError: options.onValidationError ?? user.onValidationError ?? 'fail',
-    onUnknownField: user.onUnknownField ?? 'warn'
+    onUnknownField: user.onUnknownField ?? 'warn',
+    afterBuild: afterBuildHooks(user.afterBuild, configPath)
   }
+}
+
+/** One hook or several, as a list; anything else is a mistake worth naming now. */
+function afterBuildHooks(
+  value: UserConfig['afterBuild'],
+  configPath: string
+): readonly AfterBuildHook[] {
+  if (value === undefined) return []
+  const hooks: unknown[] = Array.isArray(value) ? [...(value as unknown[])] : [value]
+  if (hooks.some(hook => typeof hook !== 'function')) {
+    throw new ConfigError(
+      '`afterBuild` must be a function, or an array of functions',
+      'Each is called with `{ documents, writeFile, root, collections, logger }` once a build succeeds.',
+      configPath
+    )
+  }
+  return hooks as AfterBuildHook[]
+}
+
+/**
+ * The name each definition object was registered under.
+ *
+ * `name` has been optional since 0.2 — it defaults to the key in
+ * `collections` — so the object a user passes back to `ctx.documents(posts)`
+ * may carry no name at all. Looking it up by its own `name` failed with
+ * "unknown collection" for a collection that plainly exists. Keyed by the
+ * object the user wrote, because that is what they hand back.
+ */
+const registered = new WeakMap<object, string>()
+
+/** The collection a reference names: a name, a definition, or `{ name }`. */
+export function collectionNameOf(ref: unknown): string | undefined {
+  if (typeof ref === 'string') return ref
+  if (ref === null || typeof ref !== 'object') return undefined
+  const own = (ref as { name?: unknown }).name
+  return registered.get(ref) ?? (typeof own === 'string' ? own : undefined)
 }
 
 /**
@@ -230,6 +268,7 @@ function validateCollections(
       }
     }
 
+    registered.set(def, name)
     out[name] = {
       ...def,
       name,

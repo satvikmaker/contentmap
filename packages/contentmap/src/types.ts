@@ -266,8 +266,16 @@ export interface TransformContext {
   logger: Logger
 }
 
-/** A collection, referred to by its definition or its name. */
-export type CollectionRef = CollectionDefinition<never, never> | { name: string } | string
+/**
+ * A collection, referred to by its definition or its name.
+ *
+ * Structural on purpose: every definition has a schema. This was
+ * `CollectionDefinition<never, never>`, which a definition with a transform
+ * is not assignable to — its transform returns something, and nothing is
+ * assignable to `never` — so `ctx.resolve(authors, id)` failed to type-check
+ * for any collection that had a transform. Only a real `next build` noticed.
+ */
+export type CollectionRef = { readonly schema: StandardSchemaV1 } | { name: string } | string
 
 /**
  * The document type a collection produces.
@@ -435,6 +443,41 @@ export interface OutputOptions {
  */
 export type ResolvedCollection = CollectionDefinition & { name: string }
 
+/**
+ * What an `afterBuild` hook receives.
+ *
+ * For the work that needs every document at once — a search index, a feed,
+ * tag counts — which no single transform can see.
+ */
+export interface AfterBuildContext {
+  /**
+   * Every document in a collection, exactly as the generated modules hold it:
+   * validated, transformed and sorted. Pass the definition — `documents(posts)`
+   * — to keep its type; a name works too, typed loosely.
+   */
+  documents<C extends CollectionRef>(collection: C): DocumentOf<C>[]
+  /** The name of every collection in the build. */
+  readonly collections: readonly string[]
+  /**
+   * Write a file, relative to the project root, and return its absolute path.
+   *
+   * Skipped when the bytes are unchanged, so a dev server watching it does not
+   * reload for nothing. Written atomically, so nothing ever reads half of it.
+   * Ignored by contentmap's own watcher, so writing it cannot start another
+   * build. Refuses a path outside the project.
+   */
+  writeFile(path: string, content: string | Uint8Array): Promise<string>
+  /** The project root — the directory the config resolves its paths against. */
+  readonly root: string
+  logger: Logger
+}
+
+/**
+ * See `UserConfig.afterBuild`. A hook may return a promise, which is awaited;
+ * whatever it resolves to is ignored, so `ctx => ctx.writeFile(…)` is a hook.
+ */
+export type AfterBuildHook = (context: AfterBuildContext) => unknown
+
 export interface UserConfig {
   collections: Record<string, CollectionDefinition>
   root?: string
@@ -453,6 +496,17 @@ export interface UserConfig {
   readConcurrency?: number
   onValidationError?: Severity
   onUnknownField?: Severity
+  /**
+   * Run after every build that succeeds — the first, and each rebuild in
+   * watch mode — with every collection's documents in hand.
+   *
+   * It runs inside the build, so `contentmap build`, `contentmap dev` and
+   * every framework integration run it the same way. A hook that throws fails
+   * the build like any other error; several run in order, and one failing
+   * does not stop the others. Skipped by `contentmap check`, which writes
+   * nothing, and after a failed build, whose documents are incomplete.
+   */
+  afterBuild?: AfterBuildHook | readonly AfterBuildHook[]
 }
 
 export interface ResolvedOutput {
@@ -493,6 +547,7 @@ export interface ResolvedConfig {
   readConcurrency: number
   onValidationError: Severity
   onUnknownField: Severity
+  afterBuild: readonly AfterBuildHook[]
 }
 
 /** One document as it exists after parse + validate. */

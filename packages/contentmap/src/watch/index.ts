@@ -8,6 +8,13 @@ export interface WatchHooks {
   /** Reload the config and rebuild everything. */
   reload(path: string): Promise<BuildResult | undefined>
   logger: Logger
+  /**
+   * Whether a path is something the build itself wrote outside the output
+   * directory — a file from an `afterBuild` hook. Its events are ignored:
+   * reacting to them would start a build from every build, forever, for any
+   * hook whose output is not byte-identical each time.
+   */
+  isOutput?(path: string): boolean
 }
 
 export interface WatchOptions {
@@ -148,7 +155,7 @@ export async function startWatch(
     if (closed) return
     if (event === 'addDir' || event === 'unlinkDir') return
     const absolute = resolve(path)
-    if (isIgnored(absolute, config)) return
+    if (isIgnored(absolute, config) || hooks.isOutput?.(absolute) === true) return
 
     if (isConfigPath(absolute, config)) pendingConfig = absolute
     else pendingPaths.add(absolute)
