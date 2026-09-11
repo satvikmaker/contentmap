@@ -9,6 +9,8 @@ dist/
 
 # contentmap generated output
 .contentmap/
+# written by the examples' afterBuild hooks during their builds
+examples/*/public/search.json
 
 # test / coverage
 coverage/

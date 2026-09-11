@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt build"
+    "build": "node ../check-hook.mjs reset && nuxt build && node ../check-hook.mjs verify"
   },
   "dependencies": {
     "@contentmap/nuxt": "workspace:*",

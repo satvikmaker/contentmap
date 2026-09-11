@@ -2,7 +2,7 @@
   "name": "@contentmap-example/next",
   "private": true,
   "scripts": {
-    "build": "next build && next build --webpack",
+    "build": "node ../check-hook.mjs reset && next build && node ../check-hook.mjs verify && node ../check-hook.mjs reset && next build --webpack && node ../check-hook.mjs verify",
     "build:webpack": "next build --webpack"
   },
   "dependencies": {

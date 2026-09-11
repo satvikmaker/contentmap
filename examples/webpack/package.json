@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "webpack --mode production"
+    "build": "node ../check-hook.mjs reset && webpack --mode production && node ../check-hook.mjs verify"
   },
   "dependencies": {
     "@contentmap/webpack": "workspace:*",

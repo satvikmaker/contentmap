@@ -19,7 +19,7 @@ try {
     `import { defineConfig, defineCollection } from '${cwd}/packages/contentmap/src/index.ts'\n` +
       `import { z } from 'zod'\n` +
       `const posts = defineCollection({ name: 'posts', directory: 'content', include: '**/*.md', schema: z.object({ title: z.string() }) })\n` +
-      `export default defineConfig({ collections: { posts } })\n`
+      `export default defineConfig({ collections: { posts }, afterBuild: ctx => ctx.writeFile('public/titles.json', JSON.stringify(ctx.documents(posts).map(p => p.title))) })\n`
   )
   await writeFile(
     join(root, 'main.js'),
@@ -55,6 +55,22 @@ try {
 
   const files = await readdir(join(root, '.contentmap'))
   console.log(`      generated: ${files.filter(f => f !== '.cache').join(', ')}`)
+
+  // afterBuild runs inside the build, so a real `vite build` has to produce
+  // exactly what the CLI's does — not merely something.
+  const hook = join(root, 'public/titles.json')
+  const viaPlugin = await readFile(hook, 'utf8').catch(() => undefined)
+  await rm(join(root, 'public'), { recursive: true, force: true })
+  const { createBuilder } = await import(`${cwd}/packages/contentmap/src/index.ts`)
+  await createBuilder({ root }).build()
+  const viaCli = await readFile(hook, 'utf8').catch(() => undefined)
+  if (viaPlugin !== undefined && viaPlugin === viaCli) {
+    console.log('PASS  afterBuild wrote the same file under vite build as under the CLI')
+  } else {
+    console.log('FAIL  afterBuild output differs between vite build and the CLI')
+    console.log(`      vite: ${viaPlugin}\n      cli:  ${viaCli}`)
+    process.exitCode = 1
+  }
 } finally {
   await rm(root, { recursive: true, force: true, maxRetries: 5 })
 }

@@ -9,4 +9,13 @@ const posts = defineCollection({
   transform: (doc, ctx) => ({ ...doc, slug: ctx.meta.slug })
 })
 
-export default defineConfig({ collections: { posts } })
+export default defineConfig({
+  collections: { posts },
+  // A search index, written by the framework's build exactly as by the CLI.
+  // The build script checks it was regenerated.
+  afterBuild: ctx =>
+    ctx.writeFile(
+      'public/search.json',
+      JSON.stringify(ctx.documents(posts).map(({ title, slug }) => ({ title, slug })))
+    )
+})

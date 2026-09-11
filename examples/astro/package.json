@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "astro build"
+    "build": "node ../check-hook.mjs reset && astro build && node ../check-hook.mjs verify"
   },
   "dependencies": {
     "@contentmap/astro": "workspace:*",
