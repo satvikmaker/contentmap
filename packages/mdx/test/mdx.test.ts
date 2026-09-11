@@ -102,3 +102,49 @@ describe('mdx compiler', () => {
     ).resolves.toContain('return')
   })
 })
+
+describe("compat: 'mdx-bundler'", () => {
+  /**
+   * How contentlayer and content-collections pages evaluate `body.code`:
+   * mdx-bundler's `getMDXComponent` passes React, ReactDOM and the JSX runtime
+   * as named parameters, rather than the runtime as the first argument.
+   */
+  const bundler = (code: string): { default: (props: object) => unknown } =>
+    new Function('React', 'ReactDOM', '_jsx_runtime', code)({}, {}, runtime)
+
+  const render = async (code: string): Promise<string> => {
+    const mod = await run(code, { ...(runtime as never), baseUrl: import.meta.url })
+    return JSON.stringify((mod.default as (props: object) => unknown)({}))
+  }
+
+  it('renders the same under run() and under getMDXComponent', async () => {
+    const code = await mdx({ compat: 'mdx-bundler' }).compile(input('# Hello *there*'))
+
+    const viaBundler = JSON.stringify(bundler(code).default({}))
+    expect(viaBundler).toBe(await render(code))
+    expect(viaBundler).toContain('there')
+  })
+
+  it('is needed: plain output breaks under getMDXComponent', async () => {
+    // The first argument there is React, which has no `jsx`. This is what a
+    // migrated contentlayer page would hit on its first render.
+    const code = await mdx().compile(input('# Hello'))
+    expect(() => bundler(code).default({})).toThrow()
+  })
+
+  it('leaves a code sample that mentions arguments[0] alone', async () => {
+    // Why the body is wrapped rather than having its `arguments[0]` rewritten.
+    const code = await mdx({ compat: 'mdx-bundler' }).compile(input('Use `arguments[0]` here'))
+    expect(JSON.stringify(bundler(code).default({}))).toContain('arguments[0]')
+    expect(await render(code)).toContain('arguments[0]')
+  })
+
+  it('keeps named exports under both', async () => {
+    const code = await mdx({ compat: 'mdx-bundler' }).compile(input('export const answer = 42'))
+    expect((bundler(code) as unknown as { answer: number }).answer).toBe(42)
+    const mod = (await run(code, { ...(runtime as never), baseUrl: import.meta.url })) as {
+      answer: number
+    }
+    expect(mod.answer).toBe(42)
+  })
+})

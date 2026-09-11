@@ -14,6 +14,19 @@ export interface MdxOptions {
    * file rather than at generated code.
    */
   development?: boolean
+  /**
+   * Make the output run under mdx-bundler's `getMDXComponent` as well.
+   *
+   * contentlayer and content-collections compiled with mdx-bundler, and the
+   * pages built on them render with `getMDXComponent(code)` or a hook wrapping
+   * it — `useMDXComponent` from next-contentlayer, pliny's
+   * `MDXLayoutRenderer`. That calls the code with React, ReactDOM and the JSX
+   * runtime as *named parameters*, where `run()` passes the runtime as the
+   * first argument. With `'mdx-bundler'` the code accepts either, so a
+   * migrated site keeps rendering without touching a page, and `run()` still
+   * works.
+   */
+  compat?: 'mdx-bundler'
 }
 
 /**
@@ -60,9 +73,28 @@ export function mdx(options: MdxOptions = {}): MdxCompiler {
           ...(merged.recmaPlugins ? { recmaPlugins: merged.recmaPlugins as never } : {})
         }
       )
-      return String(file)
+      const body = String(file)
+      return merged.compat === 'mdx-bundler' ? bundlerCompatible(body) : body
     }
   }
+}
+
+/**
+ * Wrap a function body so it runs under both calling conventions.
+ *
+ * `run()` evaluates the body with the runtime as `arguments[0]`.
+ * `getMDXComponent` evaluates it with `React, ReactDOM, _jsx_runtime, …` as
+ * named parameters, so `arguments[0]` is React — which has no `jsx` — and the
+ * page throws. The whole body moves into an inner function that is handed
+ * whichever runtime is present. Rewriting the `arguments[0]` it reads instead
+ * would also rewrite any code sample in the document that mentions it.
+ */
+function bundlerCompatible(body: string): string {
+  return (
+    'return (function () {\n' +
+    body +
+    '\n})(typeof _jsx_runtime === "undefined" ? arguments[0] : _jsx_runtime)\n'
+  )
 }
 
 export default mdx
