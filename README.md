@@ -200,6 +200,8 @@ Reads your existing config, writes a contentmap one beside it, and writes a repo
 
 Contentlayer's field DSL becomes a Zod schema, `computedFields` become a transform, and `_raw.flattenedPath` becomes `ctx.meta.path` — exact equivalents, which is what makes rewriting them automatically safe. Your documents keep the shape your pages already read (`body.raw`, `body.code`, `body.html`), MDX compiles so `useMDXComponent` keeps rendering it, the helpers and imports your config uses come along, and `onSuccess` becomes `afterBuild`. Every pattern it handles is a fixture that CI migrates and builds for real. [Details](packages/migrate).
 
+**It has been done to a whole application.** [tailwind-nextjs-starter-blog](https://github.com/timlrx/tailwind-nextjs-starter-blog) — MDX, a search index, an RSS feed, tag counts — migrated and built with `next build`: 20 files of application code changed, the generated data down from 1.66 MB to 0.91 MB, and `feed.xml` byte-identical to what Contentlayer produced. It was not automatic, and [the write-up](ROADMAP.md#real-world-validation) says exactly which parts needed a human.
+
 ## FAQ
 
 <details>
@@ -259,6 +261,7 @@ Shipped, and what's next — the detail lives in [ROADMAP.md](ROADMAP.md).
 - [x] Five framework adapters, each proven against its real toolchain, failing a build exactly where the CLI would
 - [x] A codemod for all three incumbents, built for real against every config pattern it handles
 - [x] `afterBuild` — search indexes, feeds and tag counts, run identically everywhere
+- [ ] Real-world validation — [one application migrated so far](ROADMAP.md#real-world-validation), with its numbers published
 - [ ] Search index helpers for Pagefind, Orama and MiniSearch
 - [ ] `@contentmap/git` — dates and authors from history
 - [ ] Documentation site
