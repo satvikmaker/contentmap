@@ -22,6 +22,13 @@ const repo = resolve(import.meta.dirname, '..')
 const REPO_URL = 'https://github.com/timlrx/tailwind-nextjs-starter-blog.git'
 const PIN = 'b45bef66b40c63b6f57c15ee8cd090682238df4c'
 const PATCH = join(repo, 'scripts/real-world/tailwind-nextjs-starter-blog.patch')
+// Read rather than pinned: these tarballs are named after whatever version the
+// working tree is at, so a release would otherwise leave the script looking for
+// files that `pnpm pack` no longer writes.
+const VERSION = JSON.parse(
+  await readFile(join(repo, 'packages/contentmap/package.json'), 'utf8')
+).version
+const tarball = name => `${name}-${VERSION}.tgz`
 const PAIRS = 3
 
 const args = process.argv.slice(2)
@@ -112,11 +119,11 @@ async function footprint(dir) {
  */
 function checkPacks(dir) {
   for (const name of ['contentmap', 'contentmap-next', 'contentmap-mdx']) {
-    const tarball = join(dir, `${name}-1.0.1.tgz`)
-    const { stdout, status } = spawnSync('tar', ['-xzOf', tarball, 'package/package.json'], {
+    const path = join(dir, tarball(name))
+    const { stdout, status } = spawnSync('tar', ['-xzOf', path, 'package/package.json'], {
       encoding: 'utf8'
     })
-    if (status !== 0) throw new Error(`cannot read ${tarball} — was it packed?`)
+    if (status !== 0) throw new Error(`cannot read ${path} — was it packed?`)
     if (stdout.includes('workspace:')) {
       throw new Error(`${name} was packed by npm and still names workspace:. Use \`pnpm pack\`.`)
     }
@@ -147,9 +154,9 @@ async function installClosure(work) {
   const BASE = ['next', 'react', 'react-dom']
   const mine = packs
     ? [
-        join(packs, 'contentmap-1.0.1.tgz'),
-        join(packs, 'contentmap-next-1.0.1.tgz'),
-        join(packs, 'contentmap-mdx-1.0.1.tgz'),
+        join(packs, tarball('contentmap')),
+        join(packs, tarball('contentmap-next')),
+        join(packs, tarball('contentmap-mdx')),
         'zod'
       ]
     : ['contentmap', '@contentmap/next', '@contentmap/mdx', 'zod']
@@ -236,12 +243,12 @@ try {
     const manifest = join(work, 'after/package.json')
     const pkg = JSON.parse(await readFile(manifest, 'utf8'))
     const local = name => `file:${join(packs, name)}`
-    pkg.dependencies['contentmap'] = local('contentmap-1.0.1.tgz')
-    pkg.dependencies['@contentmap/next'] = local('contentmap-next-1.0.1.tgz')
-    pkg.dependencies['@contentmap/mdx'] = local('contentmap-mdx-1.0.1.tgz')
+    pkg.dependencies['contentmap'] = local(tarball('contentmap'))
+    pkg.dependencies['@contentmap/next'] = local(tarball('contentmap-next'))
+    pkg.dependencies['@contentmap/mdx'] = local(tarball('contentmap-mdx'))
     // The adapter takes contentmap as a peer; without this the published one
     // is installed beside the tarball being measured.
-    pkg.resolutions = { contentmap: local('contentmap-1.0.1.tgz') }
+    pkg.resolutions = { contentmap: local(tarball('contentmap')) }
     await writeFile(manifest, `${JSON.stringify(pkg, null, 2)}\n`)
   }
 

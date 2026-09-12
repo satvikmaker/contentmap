@@ -27,6 +27,21 @@ export interface MdxOptions {
    * works.
    */
   compat?: 'mdx-bundler'
+  /**
+   * Minify the compiled output with esbuild.
+   *
+   * The compiler emits readable JavaScript, and for MDX that is mostly dead
+   * weight: nothing reads it, every byte is written to disk and handed to a
+   * bundler. velite has always minified, and the gap is not small — migrating a
+   * 54-document site, one page came out 52,316 characters here against 20,693
+   * there, and the whole corpus wrote 2.5× more.
+   *
+   * esbuild is an optional peer rather than a dependency, which is the bargain
+   * `@contentmap/unified` makes for rehype-raw: a project that does not ask for
+   * this never installs it, and the install footprint of everyone else is
+   * unchanged.
+   */
+  minify?: boolean
 }
 
 /**
@@ -74,9 +89,31 @@ export function mdx(options: MdxOptions = {}): MdxCompiler {
         }
       )
       const body = String(file)
-      return merged.compat === 'mdx-bundler' ? bundlerCompatible(body) : body
+      const compatible = merged.compat === 'mdx-bundler' ? bundlerCompatible(body) : body
+      // After the wrapper, so the wrapper is minified too and there is one
+      // pass rather than two.
+      return merged.minify ? await minified(compatible) : compatible
     }
   }
+}
+
+interface Minifier {
+  transform(code: string, options: { minify: boolean; loader: 'js' }): Promise<{ code: string }>
+}
+
+/**
+ * Minify a function body.
+ *
+ * `loader: 'js'` with no `format` is what keeps this valid: the output is a
+ * function body, not a module, so it carries a top-level `return` and reads
+ * `arguments[0]`. Told the code was ESM, esbuild rejects both.
+ */
+async function minified(code: string): Promise<string> {
+  const esbuild = (await import('esbuild').catch(() => {
+    throw new Error('minify requires the `esbuild` package. Install it, or leave the option off.')
+  })) as unknown as Minifier
+  const { code: out } = await esbuild.transform(code, { minify: true, loader: 'js' })
+  return out
 }
 
 /**

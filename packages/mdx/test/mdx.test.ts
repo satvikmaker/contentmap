@@ -148,3 +148,55 @@ describe("compat: 'mdx-bundler'", () => {
     expect(mod.answer).toBe(42)
   })
 })
+
+describe('minify', () => {
+  const SOURCE = [
+    '# Title',
+    '',
+    'A paragraph with **bold** text and a [link](https://example.com).',
+    '',
+    'export const meta = { a: 1 }',
+    '',
+    '- one',
+    '- two',
+    ''
+  ].join('\n')
+
+  const render = async (code: string): Promise<string> => {
+    const mod = await run(code, { ...(runtime as never), baseUrl: import.meta.url })
+    return JSON.stringify((mod.default as (props: object) => unknown)({}))
+  }
+
+  it('produces smaller output that evaluates identically', async () => {
+    // The compiler emits readable JavaScript that nothing reads. velite has
+    // always minified, and a migrated 54-document site wrote 2.5× more here
+    // than it did there.
+    const plain = await mdx().compile(input(SOURCE))
+    const small = await mdx({ minify: true }).compile(input(SOURCE))
+
+    expect(small.length).toBeLessThan(plain.length)
+    expect(await render(small)).toBe(await render(plain))
+  })
+
+  it('keeps the exports the document declares', async () => {
+    const code = await mdx({ minify: true }).compile(input(SOURCE))
+    const mod = await run(code, { ...(runtime as never), baseUrl: import.meta.url })
+    expect(mod.meta).toEqual({ a: 1 })
+  })
+
+  it('composes with mdx-bundler compat, which is the migration path', async () => {
+    // Minifying after the wrapper means the wrapper is minified too, and the
+    // free `_jsx_runtime` it tests for must survive that.
+    const code = await mdx({ minify: true, compat: 'mdx-bundler' }).compile(input(SOURCE))
+    const viaBundler = new Function('React', 'ReactDOM', '_jsx_runtime', code)({}, {}, runtime) as {
+      default: (props: object) => unknown
+    }
+
+    expect(JSON.stringify(viaBundler.default({}))).toBe(await render(code))
+  })
+
+  it('is off unless asked for', async () => {
+    const code = await mdx().compile(input(SOURCE))
+    expect(code).toContain('function _createMdxContent')
+  })
+})

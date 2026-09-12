@@ -69,11 +69,16 @@ mdx({
   remarkPlugins: [remarkGfm],
   rehypePlugins: [rehypeSlug],
   recmaPlugins: [],
-  development: process.env.NODE_ENV !== 'production'
+  development: process.env.NODE_ENV !== 'production',
+  minify: true
 })
 ```
 
 `development: true` adds source positions, so a runtime error points at the `.mdx` file rather than at generated code.
+
+`minify: true` runs the compiled output through esbuild. Nothing reads that JavaScript — it is written to disk and handed to a bundler — and unminified it is roughly 2.5× the size: migrating a 54-document site, one page came out 52,316 characters unminified against 20,693 from Velite, which has always minified. Turning it on brought the whole corpus from 7.69 MB to 3.30 MB with every rendered page identical.
+
+**esbuild is an optional peer.** Install it alongside this package to use the option; leave the option off and nothing changes, including the figures above.
 
 Options can also be passed per call — `ctx.mdx({ remarkPlugins: [...] })` — which overrides the configured ones for that document.
 

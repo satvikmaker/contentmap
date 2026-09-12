@@ -47,6 +47,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 - [x] Renderers as opt-in packages: `@contentmap/markdown` (marked) and `@contentmap/unified` (remark/rehype)
 - [x] MDX via `@contentmap/mdx` — JSX, component imports and value exports, compiled to a function body
 - [x] MDX in mdx-bundler compat mode, so pages rendering with `getMDXComponent` or `useMDXComponent` keep working after a migration
+- [x] `mdx({ minify: true })` — velite minified its MDX and this did not, which measured 2.5× larger on a real 54-document site; esbuild is an optional peer, so only the projects that ask for it install one
 - [x] Syntax highlighting via `@contentmap/shiki` — VS Code grammars, single or light/dark themes
 - [x] `ctx.markdown()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`
 - [x] Images: build-time dimensions, thumbhash placeholders, `sharp` optional
@@ -110,7 +111,6 @@ The near-term list. These are the things most likely to change someone's mind ab
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update
 - [ ] **Draft and preview modes** — a first-class way to include drafts in dev and exclude them in production
 - [ ] **RSS, sitemap and feed helpers** — `afterBuild` hooks derived from collections you already declared
-- [ ] **Minified MDX output** — velite runs its compiled MDX through esbuild and `@contentmap/mdx` ships it as written, which measured 2.5× larger on a 54-document site. Worth doing without putting a bundler in the dependency tree
 
 ### Types and editors
 
@@ -206,16 +206,16 @@ Two things worth saying plainly:
 |                                           | velite                  | contentmap              |
 | ----------------------------------------- | ----------------------- | ----------------------- |
 | Install, added to a Next + React baseline | +150 packages, +40.3 MB | +148 packages, +13.7 MB |
-| Generated data                            | 3.04 MB                 | 7.69 MB                 |
+| Generated data                            | 3.04 MB                 | 3.30 MB                 |
 | Application code changed                  | —                       | 3 files, +12 −15        |
 | Static pages                              | 65 of 65                | 65 of 65                |
 | Shared First Load JS                      | 102 kB                  | 102 kB                  |
 
 All 53 prerendered documentation pages come out identical, `rehype-pretty-code`'s syntax highlighting included — the only bytes that differ between the two builds are Next's own per-build ids and chunk hashes.
 
-The generated-data row goes the other way, and it is the most useful number here:
+Three things worth saying plainly:
 
-- **contentmap writes 2.5× more than velite does, because velite minifies compiled MDX and `@contentmap/mdx` does not.** One page's compiled body is 20,693 characters out of velite and 52,316 out of contentmap. It costs disk and nothing else on this site — the pages, the shared JS and the prerendered HTML are all identical — but it is a real regression for anyone moving a large MDX corpus across, and it is on the list below rather than explained away.
+- **The generated-data row is the reason `@contentmap/mdx` now minifies.** Measured the first time, contentmap wrote 7.69 MB against velite's 3.04 MB — 2.5× more, because velite runs its compiled MDX through esbuild and this did not. One page's body was 20,693 characters out of velite and 52,316 out of contentmap. `mdx({ minify: true })` closes it to the 3.30 MB above, with all 53 pages still rendering identically; esbuild is an optional peer, so nobody who leaves the option alone pays for it.
 - **The build went red on content velite had been shipping.** velite reports a schema violation as `info`, keeps the document and exits 0; contentmap fails. 53 of 54 documents built and the whole thing stopped on one description three characters past the `.max(100)` the project's own schema asks for. A migrated config now carries `onValidationError: 'warn'` so the first build after a migration behaves the way the last build before it did, with a note saying how to tighten it once the content is clean.
 - **The `output` block used to vanish.** velite's `data`, `assets`, `base` and `name` were never read by the codemod, which is the one way "nothing is dropped silently" actually broke. They map field for field and are carried now.
 
