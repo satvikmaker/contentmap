@@ -6,6 +6,14 @@ import remarkRehype from 'remark-rehype'
 import { unified, type Plugin } from 'unified'
 import type { Renderer, RenderInput } from 'contentmap'
 
+/**
+ * A plugin, or a plugin with its options.
+ *
+ * `[plugin, options]` is how every remark/rehype config in the ecosystem
+ * configures a plugin, so it has to be accepted here too.
+ */
+export type UnifiedPlugin = Plugin | readonly [Plugin, ...unknown[]]
+
 export interface UnifiedOptions {
   /** GitHub Flavored Markdown. Default true. */
   gfm?: boolean
@@ -19,8 +27,8 @@ export interface UnifiedOptions {
    * is a decision worth making explicitly.
    */
   allowDangerousHtml?: boolean
-  remarkPlugins?: readonly Plugin[]
-  rehypePlugins?: readonly Plugin[]
+  remarkPlugins?: readonly UnifiedPlugin[]
+  rehypePlugins?: readonly UnifiedPlugin[]
 }
 
 /**
@@ -32,9 +40,16 @@ export interface UnifiedOptions {
  */
 export function unifiedRenderer(options: UnifiedOptions = {}): Renderer {
   const build = async () => {
+    // `use(x)` reads a bare array as a list of pluggables, so a
+    // `[plugin, options]` tuple has to be spread into `use(plugin, options)`
+    // — handed over whole, the options object is read as an empty preset and
+    // unified refuses it.
+    const add = (processor: any, plugin: UnifiedPlugin) =>
+      Array.isArray(plugin) ? processor.use(...plugin) : processor.use(plugin)
+
     const processor: any = unified().use(remarkParse)
     if (options.gfm ?? true) processor.use(remarkGfm)
-    for (const plugin of options.remarkPlugins ?? []) processor.use(plugin)
+    for (const plugin of options.remarkPlugins ?? []) add(processor, plugin)
     processor.use(remarkRehype, {
       allowDangerousHtml: options.allowDangerousHtml ?? false
     })
@@ -49,7 +64,7 @@ export function unifiedRenderer(options: UnifiedOptions = {}): Renderer {
       processor.use(mod.default)
     }
     if (options.headingIds ?? true) processor.use(rehypeSlug)
-    for (const plugin of options.rehypePlugins ?? []) processor.use(plugin)
+    for (const plugin of options.rehypePlugins ?? []) add(processor, plugin)
     processor.use(rehypeStringify, { allowDangerousHtml: options.allowDangerousHtml ?? false })
     return processor.freeze()
   }

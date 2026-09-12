@@ -268,6 +268,36 @@ describe('renderer conformance', () => {
   })
 })
 
+describe('unified plugin options', () => {
+  // Every remark/rehype config in the ecosystem spells a configured plugin
+  // `[plugin, options]`, and unified's own `use()` reads a bare array as a
+  // LIST of pluggables — so passing the tuple straight through made unified
+  // treat the options object as a preset and refuse it with "Expected usable
+  // value but received an empty preset". Migrating svgl, which configures
+  // shiki that way, failed on every document.
+  const heading = (options: { id?: string } = {}) => {
+    return (tree: any) => {
+      for (const node of tree.children ?? []) {
+        if (node.type === 'element' && node.tagName === 'h1') {
+          node.properties = { ...node.properties, id: options.id ?? 'none' }
+        }
+      }
+    }
+  }
+
+  it('accepts a [plugin, options] tuple', async () => {
+    const renderer = unifiedRenderer({ rehypePlugins: [[heading, { id: 'set-by-options' }]] })
+    const html = await renderer.toHtml({ body: '# Title', path: '/a.md', meta })
+    expect(html).toContain('id="set-by-options"')
+  })
+
+  it('still accepts a bare plugin', async () => {
+    const renderer = unifiedRenderer({ rehypePlugins: [heading] })
+    const html = await renderer.toHtml({ body: '# Title', path: '/a.md', meta })
+    expect(html).toContain('id="none"')
+  })
+})
+
 describe('code is not mistaken for content', () => {
   const marked = markdown()
   const source = [
