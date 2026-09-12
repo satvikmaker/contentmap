@@ -692,7 +692,7 @@ export class Builder {
     collection: ResolvedCollection,
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
-    file: { relativePath: string; absolutePath: string; content: string },
+    file: { relativePath: string; absolutePath: string; content: string; virtual?: boolean },
     body: string,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
