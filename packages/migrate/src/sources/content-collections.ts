@@ -102,7 +102,15 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
       // contentmap validates first and passes only the schema's own output, so
       // `_meta` lives on the context. Same field names, different owner — and
       // left alone it reads as undefined at runtime rather than failing loudly.
-      const rewritten = withContext(transform, original.replace(/\b(\w+)\._meta\b/g, 'ctx.meta'))
+      // Whatever the transform calls its context, `_meta` has to move onto
+      // that name — spelling it `ctx` regardless emitted a reference to a
+      // parameter the function never declared.
+      const context = contextName(transform)
+      const rewritten = withContext(
+        transform,
+        original.replace(/\b(\w+)\._meta\b/g, `${context}.meta`),
+        context
+      )
       plan.transform = rewritten
       if (rewritten !== original) {
         notes.push({
@@ -183,7 +191,20 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
 }
 
 /**
- * Give the transform a `ctx` parameter if the rewrite started using one.
+ * What this transform calls its context, or `ctx` if it does not take one.
+ *
+ * Real configs spell it `context` as often as `ctx`, and the rewrite that moves
+ * `_meta` has to use the name that is actually in scope.
+ */
+function contextName(node: ts.Expression): string {
+  if (!ts.isArrowFunction(node)) return 'ctx'
+  const second = node.parameters[1]
+  if (second && ts.isIdentifier(second.name)) return second.name.text
+  return 'ctx'
+}
+
+/**
+ * Give the transform a context parameter if the rewrite started using one.
  *
  * content-collections transforms are commonly written `(doc) => …` because the
  * context is rarely needed. Moving `_meta` onto the context makes it needed, and
@@ -191,8 +212,8 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
  * "ctx is not defined" on the first build — which a text-comparison test cannot
  * see, and a real build finds immediately.
  */
-function withContext(node: ts.Expression, rewritten: string): string {
-  if (!rewritten.includes('ctx.')) return rewritten
+function withContext(node: ts.Expression, rewritten: string, context: string): string {
+  if (!rewritten.includes(`${context}.`)) return rewritten
   if (!ts.isArrowFunction(node)) return rewritten
   if (node.parameters.length >= 2) return rewritten
 
@@ -203,7 +224,7 @@ function withContext(node: ts.Expression, rewritten: string): string {
   // having to work out whether parentheses were there.
   const head = rewritten.slice(0, node.equalsGreaterThanToken.getStart() - node.getStart())
   const isAsync = /\basync\b/.test(head)
-  return `${isAsync ? 'async ' : ''}(${name}, ctx) ${rewritten.slice(head.length)}`
+  return `${isAsync ? 'async ' : ''}(${name}, ${context}) ${rewritten.slice(head.length)}`
 }
 
 /** `defineSingleton(...)` means one document, which contentmap spells `single`. */

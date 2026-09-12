@@ -245,6 +245,22 @@ describe('content-collections', () => {
     expect(result.config).toContain('async (doc, ctx) =>')
   })
 
+  it('moves _meta onto the context by the name that context already has', () => {
+    // Found on pheralb/svgl, whose transform takes `(document, context)`. The
+    // rewrite spelled the context `ctx` whatever it was really called, so the
+    // emitted config referenced a parameter that did not exist — `ctx` is not
+    // defined, at the first build, from a config that looked right.
+    const out = migrate(
+      CONTENT_COLLECTIONS.replace(
+        'transform: async (doc, ctx) =>',
+        'transform: async (document, context) =>'
+      ).replace(/\bdoc\._meta\b/g, 'document._meta'),
+      'content-collections'
+    )
+    expect(out.config).toContain('context.meta')
+    expect(out.config).not.toContain('ctx.meta')
+  })
+
   it('warns that the transform context is not the same object', () => {
     const note = result.notes.find(n => n.subject === 'transform' && n.kind === 'manual')
     expect(note?.hint).toContain('cache()')
