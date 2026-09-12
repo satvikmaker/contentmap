@@ -56,6 +56,14 @@ describe('shared computed fields', () => {
     expect(result.config).not.toContain('ComputedFields')
     expect(result.notes.filter(n => n.kind === 'manual')).toEqual([])
   })
+
+  it('carries contentlayer’s type field onto every document', () => {
+    // A migrated starter's search index was identical to contentlayer's but
+    // for this one field, which its pages and its index both read.
+    expect(result.config).toContain("type: 'Post',")
+    expect(result.config).toContain("type: 'Page',")
+    expect(note(result, 'posts.type')?.message).toContain("type: 'Post'")
+  })
 })
 
 describe('shared fields', () => {

@@ -167,6 +167,8 @@ interface Shape {
   bodyField: string
   typeField: string
   locals: Locals
+  /** Whether the transform adds contentlayer's `type` field to each document. */
+  carriesType?: boolean
 }
 
 export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
@@ -267,8 +269,20 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
     }
 
     const shape: Shape = { typeName, contentType, bodyField, typeField, locals }
-    const transform = buildTransform(file, computed, shape, sink)
+    // contentlayer put the type name on every document, and code reads it —
+    // a migrated starter's search index was identical but for this field.
+    // Not when the schema claims the name for itself.
+    const carriesType = !plan.fields.some(field => field.name === typeField)
+    const transform = buildTransform(file, computed, { ...shape, carriesType }, sink)
     if (transform) plan.transform = transform
+    if (carriesType) {
+      notes.push({
+        kind: 'review',
+        collection: key,
+        subject: typeField,
+        message: `each document carries \`${typeField}: '${typeName}'\`, as contentlayer's did`
+      })
+    }
     if (contentType !== 'data') notes.push(bodyNote(key, shape))
     collections.push(plan)
   }
@@ -648,7 +662,12 @@ function buildTransform(
   const { doc, ctx, body } = shape.locals
   const head = `${awaits ? 'async ' : ''}(${doc}, ${ctx}) =>`
   if (!hasBody && !legacy) {
-    const lines = [`${head} ({`, `    ...${doc},`, ...props.map(p => `    ${reindent(p, '    ')},`)]
+    const lines = [
+      `${head} ({`,
+      `    ...${doc},`,
+      ...(shape.carriesType ? [`    ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`] : []),
+      ...props.map(p => `    ${reindent(p, '    ')},`)
+    ]
     return [...withoutTrailingComma(lines), '  })'].join('\n')
   }
 
@@ -660,6 +679,7 @@ function buildTransform(
   }
   if (legacy) lines.push(...legacyShape(shape))
   lines.push('    return {', `      ...${doc},`)
+  if (shape.carriesType) lines.push(`      ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`)
   if (hasBody) {
     lines.push(
       `      ${shape.bodyField === body ? body : `${propertyKey(shape.bodyField)}: ${body}`},`

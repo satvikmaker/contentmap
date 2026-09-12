@@ -335,6 +335,21 @@ describe('output that has to compile', () => {
     expect(result.config).toContain('const body = { raw: ctx.body')
   })
 
+  it('leaves a field named type to its author', () => {
+    // Documents carry contentlayer's `type` so code reading it keeps working,
+    // but a schema that declares the name means something else by it, and
+    // writing the type name over the author's value would be a silent lie.
+    const result = migrate(
+      `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+       const A = defineDocumentType(() => ({ name: 'Post', filePathPattern: '*.md',
+         fields: { type: { type: 'enum', options: ['note', 'essay'] } } }))
+       export default makeSource({ contentDirPath: 'c', documentTypes: [A] })`,
+      'contentlayer2'
+    )
+    expect(result.config).toContain("type: z.enum(['note', 'essay']).optional()")
+    expect(result.config).not.toContain("type: 'Post'")
+  })
+
   it('never emits a reserved word as a collection name', () => {
     const result = migrate(
       `import { defineCollection } from '@content-collections/core'

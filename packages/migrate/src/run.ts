@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util'
-import { access, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { detect } from './detect.ts'
 import { renderNotes } from './emit.ts'
@@ -111,9 +111,61 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
         `${counts.review} worth reviewing — see ${relative(root, reportPath)}\n\n`
     )
   }
-  process.stdout.write(`  Install: npm i ${result.install.join(' ')}\n`)
+  const project = await projectPackages(root)
+  const install = [...result.install, ...(project.adapter ? [project.adapter] : [])]
+  process.stdout.write(`  Install: npm i ${install.join(' ')}\n`)
+  if (project.remove.length > 0) {
+    process.stdout.write(`  Remove:  npm rm ${project.remove.join(' ')}\n`)
+  }
   process.stdout.write('  Then:    npx contentmap build\n')
+  // The original config is deliberately left alone, and a project that
+  // type-checks its own files — `next build` does — fails on it until it goes.
+  process.stdout.write(
+    `  Finally: delete ${relative(root, found.path)} once the build passes\n`
+  )
   return 0
+}
+
+/** The framework integration a project needs, keyed by what it already has. */
+const ADAPTERS: [string, string][] = [
+  ['next', '@contentmap/next'],
+  ['nuxt', '@contentmap/nuxt'],
+  ['astro', '@contentmap/astro'],
+  ['vite', '@contentmap/vite'],
+  ['webpack', '@contentmap/webpack']
+]
+
+/** Packages the migration replaces, which the project can uninstall. */
+const REPLACED = [
+  'contentlayer',
+  'contentlayer2',
+  'next-contentlayer',
+  'next-contentlayer2',
+  'velite',
+  '@content-collections/core',
+  '@content-collections/cli',
+  '@content-collections/next',
+  '@content-collections/mdx',
+  '@content-collections/markdown',
+  '@content-collections/vite'
+]
+
+async function projectPackages(root: string): Promise<{ adapter?: string; remove: string[] }> {
+  const manifest = await readFile(join(root, 'package.json'), 'utf8').then(
+    text =>
+      JSON.parse(text) as {
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+      },
+    () => undefined
+  )
+  if (!manifest) return { remove: [] }
+  const deps = { ...manifest.dependencies, ...manifest.devDependencies }
+  const adapter = ADAPTERS.find(([name]) => deps[name] !== undefined)?.[1]
+  return {
+    ...(adapter === undefined ? {} : { adapter }),
+    remove: REPLACED.filter(name => deps[name] !== undefined)
+  }
 }
 
 async function exists(path: string): Promise<boolean> {

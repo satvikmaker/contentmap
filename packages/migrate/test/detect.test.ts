@@ -105,6 +105,34 @@ describe('migrate cli', () => {
     expect(await fixture.read('CONTENTMAP-MIGRATION.md')).toContain('Migrating from velite')
   })
 
+  fixtureTest('names the integration to add, what to remove, and the config to delete', async ({
+    fixture
+  }) => {
+    // Migrating a real starter by hand, three things were missing from this
+    // output: the adapter to install, the packages that are now dead weight,
+    // and the old config — which `next build` type-checks and fails on.
+    await fixture.write(
+      'contentlayer.config.ts',
+      `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+const Post = defineDocumentType(() => ({ name: 'Post', filePathPattern: '**/*.md',
+  contentType: 'data', fields: { title: { type: 'string', required: true } } }))
+export default makeSource({ contentDirPath: 'content', documentTypes: [Post] })
+`
+    )
+    await fixture.write(
+      'package.json',
+      JSON.stringify({
+        dependencies: { next: '15.5.12', contentlayer2: '0.5.8', 'next-contentlayer2': '0.5.8' }
+      })
+    )
+
+    const { out } = await cli(['--root', fixture.dir])
+
+    expect(out).toContain('@contentmap/next')
+    expect(out).toContain('npm rm contentlayer2 next-contentlayer2')
+    expect(out).toContain('delete contentlayer.config.ts')
+  })
+
   fixtureTest('never modifies the config it read', async ({ fixture }) => {
     await fixture.write('velite.config.ts', VELITE)
 

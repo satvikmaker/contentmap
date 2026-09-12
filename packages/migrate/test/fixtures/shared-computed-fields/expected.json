@@ -1,8 +1,13 @@
 {
   "posts": {
-    "posts/hello": { "slug": "hello", "path": "posts/hello", "url": "/blog/posts/hello" }
+    "posts/hello": {
+      "slug": "hello",
+      "path": "posts/hello",
+      "url": "/blog/posts/hello",
+      "type": "Post"
+    }
   },
   "pages": {
-    "pages/about": { "slug": "about", "path": "pages/about" }
+    "pages/about": { "slug": "about", "path": "pages/about", "type": "Page" }
   }
 }
