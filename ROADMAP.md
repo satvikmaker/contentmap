@@ -110,6 +110,7 @@ The near-term list. These are the things most likely to change someone's mind ab
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update
 - [ ] **Draft and preview modes** — a first-class way to include drafts in dev and exclude them in production
 - [ ] **RSS, sitemap and feed helpers** — `afterBuild` hooks derived from collections you already declared
+- [ ] **Minified MDX output** — velite runs its compiled MDX through esbuild and `@contentmap/mdx` ships it as written, which measured 2.5× larger on a 54-document site. Worth doing without putting a bundler in the dependency tree
 
 ### Types and editors
 
@@ -197,6 +198,26 @@ Two things worth saying plainly:
 
 - **The package count barely moves**, because `@contentmap/unified` brings the remark/rehype tree with it — that renderer is the heavy option and its own documentation says so. The size is what changes, 56.4 MB to 11.9 MB. A project that does not need rehype plugins uses `@contentmap/markdown` and pays far less than either.
 - **Two bugs came out of this one, both found by building rather than by reading.** The codemod spelled the transform's context `ctx` no matter what the config called it, so svgl's `(document, context) => …` produced a config referencing a parameter that did not exist. And `@contentmap/unified` could not accept `[plugin, options]` — the way the entire remark/rehype ecosystem configures a plugin — so every document failed on the first real config that used it.
+
+#### velite → contentmap: neobrutalism-components
+
+[neobrutalism-components](https://github.com/ekmas/neobrutalism-components) at [`532ebeb`](https://github.com/ekmas/neobrutalism-components/commit/532ebeb) — 54 MDX documents on Next, compiled through `remark-code-import`, `rehype-pretty-code` with a theme read off disk, an extracted table of contents and two tree visitors the project wrote itself.
+
+|                                           | velite                  | contentmap              |
+| ----------------------------------------- | ----------------------- | ----------------------- |
+| Install, added to a Next + React baseline | +150 packages, +40.3 MB | +148 packages, +13.7 MB |
+| Generated data                            | 3.04 MB                 | 7.69 MB                 |
+| Application code changed                  | —                       | 3 files, +12 −15        |
+| Static pages                              | 65 of 65                | 65 of 65                |
+| Shared First Load JS                      | 102 kB                  | 102 kB                  |
+
+All 53 prerendered documentation pages come out identical, `rehype-pretty-code`'s syntax highlighting included — the only bytes that differ between the two builds are Next's own per-build ids and chunk hashes.
+
+The generated-data row goes the other way, and it is the most useful number here:
+
+- **contentmap writes 2.5× more than velite does, because velite minifies compiled MDX and `@contentmap/mdx` does not.** One page's compiled body is 20,693 characters out of velite and 52,316 out of contentmap. It costs disk and nothing else on this site — the pages, the shared JS and the prerendered HTML are all identical — but it is a real regression for anyone moving a large MDX corpus across, and it is on the list below rather than explained away.
+- **The build went red on content velite had been shipping.** velite reports a schema violation as `info`, keeps the document and exits 0; contentmap fails. 53 of 54 documents built and the whole thing stopped on one description three characters past the `.max(100)` the project's own schema asks for. A migrated config now carries `onValidationError: 'warn'` so the first build after a migration behaves the way the last build before it did, with a note saying how to tighten it once the content is clean.
+- **The `output` block used to vanish.** velite's `data`, `assets`, `base` and `name` were never read by the codemod, which is the one way "nothing is dropped silently" actually broke. They map field for field and are carried now.
 
 ---
 
