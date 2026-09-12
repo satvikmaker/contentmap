@@ -199,6 +199,21 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
 
   const configProps: ConfigProp[] = []
 
+  // velite prints a schema violation as `info`, keeps the document and exits
+  // 0; contentmap fails the build. Migrating a real project, that difference
+  // turned a green build red on one description three characters over its own
+  // `.max(100)` — worth knowing, but not as a broken build on day one. `warn`
+  // is what velite was already doing.
+  configProps.push("onValidationError: 'warn'")
+  notes.push({
+    kind: 'review',
+    subject: 'onValidationError',
+    message: 'velite treated schema violations as advice; contentmap fails the build',
+    hint:
+      "Set to 'warn' to keep velite's behaviour — the violation is reported and the document " +
+      "is kept. Remove it, or set 'fail', once the content is clean."
+  })
+
   // velite's output block maps onto contentmap's field for field, the
   // `[hash:6]` token included, so it is converted rather than reported. It was
   // not read at all before: `data` moves where documents are written and

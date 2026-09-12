@@ -167,6 +167,17 @@ describe('velite', () => {
     expect(result.config).toContain("typeName: 'Post'")
   })
 
+  it("keeps velite's advisory validation rather than failing builds that passed", () => {
+    // velite prints a schema violation as `info` and exits 0, keeping the
+    // document. contentmap fails the build. Migrating neobrutalism-components
+    // that difference turned a green build red on a description three
+    // characters over its own `.max(100)` — a real finding, but not one the
+    // codemod gets to spring on someone as a broken build.
+    expect(result.config).toContain("onValidationError: 'warn'")
+    const note = result.notes.find(n => n.subject === 'onValidationError')
+    expect(note?.hint).toContain('fail')
+  })
+
   it('carries the output block over, which maps field for field', () => {
     // Never read at all before: a velite config's `output` was dropped with
     // no note, which is the one way "nothing is dropped silently" breaks.
