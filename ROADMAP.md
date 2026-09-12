@@ -156,7 +156,9 @@ The original bar asked for ten frameworks in CI, a documentation site, and a wri
 
 ### Real-world validation
 
-The first entry, and the item stays open until there are several.
+Applications nobody here wrote, migrated and built. The item stays open until there are several more.
+
+#### contentlayer2 → contentmap: tailwind-nextjs-starter-blog
 
 [tailwind-nextjs-starter-blog](https://github.com/timlrx/tailwind-nextjs-starter-blog) at [`b45bef6`](https://github.com/timlrx/tailwind-nextjs-starter-blog/commit/b45bef66b40c63b6f57c15ee8cd090682238df4c) — 13 documents, MDX, a search index, an RSS feed, tag counts, nobody here wrote a line of it. Migrated with `@contentmap/migrate`, then built with `next build`. Reproduce all of it with [`scripts/real-world.mjs`](scripts/real-world.mjs), which clones that pin, migrates it, applies the application patch beside it and measures both sides.
 
@@ -177,6 +179,24 @@ Three things those numbers do not say, because a measurement without its conditi
 - **The project's whole `node_modules` grew**, 573.4 MB to 582.4 MB. The starter depends on `pliny`, which depends on contentlayer2, so the old tool stays installed regardless. The install row measures each content layer against a 306-package, 314.7 MB baseline that already holds next, react and react-dom — the part a project actually chooses. It has to be a difference rather than a raw closure, because `next-contentlayer2` declares `next` as a dependency where `@contentmap/next` takes it as a peer: measured raw, contentlayer is charged 434 MB for carrying Next around inside its own closure, which flatters contentmap by about 300 MB and is not a real cost.
 - **There is no build-time row**, and the reason is worth more than the number would have been. `real-world.mjs` times the two sides in alternating pairs and discards any pair whose load average moved between its halves; on the run that produced this table all three pairs were discarded, so it reported nothing. What the discarded pairs show is why: builds came in at 23.6s and 95.4s on contentlayer, and at 22.7s, 91.6s and 17.4s on contentmap. The spikes land on both sides because they are not the content layer — `app/layout.tsx` pulls Space Grotesk through `next/font/google`, a cold build deletes `.next` and its font cache with it, and every build therefore refetches from Google. A number goes in this row when there is idle hardware and a warm font cache to produce it honestly.
 - **The migration was not automatic.** The codemod converted the config and reported the rest: this starter sorts and formats dates as strings, so its `z.coerce.date()` fields needed a `.transform()` back to ISO, and the old `contentlayer.config.ts` had to be deleted before `next build` would pass, because it type-checks files nothing imports. Both are in the report it prints. Three fixes here came out of the attempt — documents now carry contentlayer's `type` field, the generated directory is marked ESM, and the CLI now names the integration to install, the packages to remove, and the config to delete.
+
+#### content-collections → contentmap: svgl
+
+[svgl](https://github.com/pheralb/svgl) at [`b496499`](https://github.com/pheralb/svgl/commit/b49649915224db817b89ff400b940a2a93bdb3d3) — a SvelteKit site whose docs run through shiki, autolinked headings, external-link rewriting and two rehype plugins of its own. A different incumbent and a different integration from the entry above: this one goes through `@contentmap/vite`, and its markdown goes through `@contentmap/unified` because of those plugins.
+
+|                                            | content-collections     | contentmap              |
+| ------------------------------------------ | ----------------------- | ----------------------- |
+| Install, added to a Svelte + Vite baseline | +122 packages, +56.4 MB | +116 packages, +11.9 MB |
+| Generated data                             | 196 kB                  | 116 kB                  |
+| Application code changed                   | —                       | 6 files, +19 −14        |
+| Whole `node_modules`                       | 341.6 MB                | 333.5 MB                |
+
+Every field the two tools derive from content came out identical — `html` (shiki highlighting included), `content`, `tableOfContents`, `title`, `description` and both URL fields. The only two that differ, `createdAt` and `updatedAt`, are read with `fs.stat` from the source file, and the two checkouts were written to disk four seconds apart.
+
+Two things worth saying plainly:
+
+- **The package count barely moves**, because `@contentmap/unified` brings the remark/rehype tree with it — that renderer is the heavy option and its own documentation says so. The size is what changes, 56.4 MB to 11.9 MB. A project that does not need rehype plugins uses `@contentmap/markdown` and pays far less than either.
+- **Two bugs came out of this one, both found by building rather than by reading.** The codemod spelled the transform's context `ctx` no matter what the config called it, so svgl's `(document, context) => …` produced a config referencing a parameter that did not exist. And `@contentmap/unified` could not accept `[plugin, options]` — the way the entire remark/rehype ecosystem configures a plugin — so every document failed on the first real config that used it.
 
 ---
 
