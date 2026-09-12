@@ -339,6 +339,28 @@ describe('content-collections', () => {
     expect(out.config).toContain('{ documents, meta }')
   })
 
+  it('turns a method-shorthand transform into something that can be a value', () => {
+    // `transform(doc) { … }` is as valid a way to write one as
+    // `transform: doc => …`, and `prop()` has always handed both back. Emitted
+    // as written it produced `transform: transform(doc) { … }`, which is not
+    // JavaScript at all — the config did not parse.
+    for (const [source, expected] of [
+      ['transform(doc, context) { return { s: doc._meta.path } }', 'function (doc, context)'],
+      ['transform(doc) { return { s: doc._meta.path } }', 'function (doc, ctx)'],
+      ['async transform(doc) { return { s: doc._meta.path } }', 'async function (doc, ctx)']
+    ]) {
+      const out = migrate(
+        CONTENT_COLLECTIONS.replace(
+          'transform: async (doc, ctx) => ({ ...doc, slug: doc._meta.path })',
+          source
+        ),
+        'content-collections'
+      )
+      expect(out.config, source).toContain(`transform: ${expected}`)
+      expect(out.config, source).not.toContain('transform: transform')
+    }
+  })
+
   it('says so when a transform declared elsewhere reads _meta', () => {
     // `transform: build` is carried over verbatim and nothing rewrites the
     // inside of it, so `_meta` reads as undefined on the first build from code
@@ -381,10 +403,23 @@ describe('content-collections', () => {
 describe('every migration', () => {
   it('produces a config that parses as TypeScript', async () => {
     const ts = (await import('typescript')).default
+    const METHOD = CONTENT_COLLECTIONS.replace(
+      'transform: async (doc, ctx) => ({ ...doc, slug: doc._meta.path })',
+      'transform(doc, context) { return { ...doc, slug: doc._meta.path } }'
+    )
+    const DESTRUCTURED = CONTENT_COLLECTIONS.replace(
+      'transform: async (doc, ctx) =>',
+      'transform: async (doc, { documents }) =>'
+    )
+    // The three canonical configs all happen to write their transform the same
+    // way, so this gate passed while a method-shorthand one emitted a config
+    // that was not JavaScript.
     for (const [source, tool] of [
       [CONTENTLAYER, 'contentlayer2'],
       [VELITE, 'velite'],
-      [CONTENT_COLLECTIONS, 'content-collections']
+      [CONTENT_COLLECTIONS, 'content-collections'],
+      [METHOD, 'content-collections'],
+      [DESTRUCTURED, 'content-collections']
     ] as const) {
       const { config } = migrate(source, tool)
       const parsed = ts.createSourceFile('out.ts', config, ts.ScriptTarget.Latest, true)

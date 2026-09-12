@@ -107,9 +107,13 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
       // parameter the function never declared.
       const uses = /\b\w+\._meta\b/.test(original)
       const context = contextFor(transform)
-      const rewritten = uses
-        ? context.declare(original).replace(/\b(\w+)\._meta\b/g, context.expression)
-        : original
+      const declared = uses ? context.declare(original) : original
+      // A method is not a value. `transform(doc) { … }` is as valid a way to
+      // write one as `transform: doc => …`, and emitted as written it produced
+      // `transform: transform(doc) { … }` — a config that did not parse.
+      // Applied after `declare`, whose offsets all sit past the method name.
+      const asValue = methodAsFunction(transform, declared)
+      const rewritten = uses ? asValue.replace(/\b(\w+)\._meta\b/g, context.expression) : asValue
       plan.transform = rewritten
       if (rewritten !== original) {
         notes.push({
@@ -251,13 +255,44 @@ interface ContextUse {
   opaque?: boolean
 }
 
+/**
+ * The function literal this expression is, in any of the three spellings a
+ * transform is written in.
+ *
+ * A method is included because `prop()` hands one back: `transform(doc) { … }`
+ * and `transform: doc => …` mean the same thing to content-collections, so
+ * they have to mean the same thing here.
+ */
+function functionLike(
+  node: ts.Expression
+): ts.ArrowFunction | ts.FunctionExpression | ts.MethodDeclaration | undefined {
+  const inner = node as unknown as ts.Node
+  if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner)) return inner
+  if (ts.isMethodDeclaration(inner)) return inner
+  return undefined
+}
+
+/**
+ * Rewrite a method's head so it can be a property's value.
+ *
+ * Only the head: everything from the parameter list onwards is the text handed
+ * in, which by this point may already have a context parameter added to it.
+ */
+function methodAsFunction(node: ts.Expression, source: string): string {
+  const inner = node as unknown as ts.Node
+  if (!ts.isMethodDeclaration(inner)) return source
+  const isAsync = inner.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false
+  return `${isAsync ? 'async ' : ''}function ${source.slice(inner.name.getEnd() - inner.getStart())}`
+}
+
 function contextFor(node: ts.Expression): ContextUse {
   const plain = (expression: string): ContextUse => ({ expression, declare: source => source })
-  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
+  const fn = functionLike(node)
+  if (!fn) {
     return { ...plain('ctx.meta'), opaque: true }
   }
 
-  const second = node.parameters[1]
+  const second = fn.parameters[1]
   if (second && ts.isIdentifier(second.name)) return plain(`${second.name.text}.meta`)
 
   if (second && ts.isObjectBindingPattern(second.name)) {
@@ -273,7 +308,7 @@ function contextFor(node: ts.Expression): ContextUse {
     // Before the closing brace when the pattern is empty, after the last
     // binding otherwise — both measured from the start of the function so the
     // offset lands in the same place in the text being spliced.
-    const at = (last ? last.getEnd() : pattern.getStart() + 1) - node.getStart()
+    const at = (last ? last.getEnd() : pattern.getStart() + 1) - fn.getStart()
     return {
       expression: 'meta',
       // A populated pattern already has its closing space; an empty one has
@@ -286,20 +321,23 @@ function contextFor(node: ts.Expression): ContextUse {
 
   // No context at all, which is how most of these are written: the context is
   // rarely needed until `_meta` moves onto it.
-  const first = node.parameters[0]
+  const first = fn.parameters[0]
   const name = first && ts.isIdentifier(first.name) ? first.name.text : 'doc'
   return {
     expression: 'ctx.meta',
     declare: source => {
-      if (ts.isFunctionExpression(node)) {
-        const open = node.parameters.pos - node.getStart()
-        const close = (first ? first.getEnd() : node.parameters.end) - node.getStart()
-        return `${source.slice(0, open)}${first ? `${name}, ` : ''}ctx${source.slice(close)}`
+      if (!ts.isArrowFunction(fn)) {
+        // Both parameters are written out, even when the source declared
+        // none: a bare `ctx` would land in the first position and be handed
+        // the document.
+        const open = fn.parameters.pos - fn.getStart()
+        const close = (first ? first.getEnd() : fn.parameters.end) - fn.getStart()
+        return `${source.slice(0, open)}${name}, ctx${source.slice(close)}`
       }
       // Everything before the arrow is `async?` plus the parameter list, so
       // replacing that span rewrites both forms — `doc =>` and `(doc) =>` —
       // without having to work out whether parentheses were there.
-      const head = source.slice(0, node.equalsGreaterThanToken.getStart() - node.getStart())
+      const head = source.slice(0, fn.equalsGreaterThanToken.getStart() - fn.getStart())
       const isAsync = /\basync\b/.test(head)
       return `${isAsync ? 'async ' : ''}(${name}, ctx) ${source.slice(head.length)}`
     }
