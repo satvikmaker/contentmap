@@ -58,6 +58,64 @@ describe('build pipeline', () => {
     expect(JSON.parse(manifest)).toEqual({ type: 'module' })
   })
 
+  fixtureTest('gives a transform the absolute path of its own file', async ({ fixture }) => {
+    // `meta.filePath` is relative to the collection's directory, so a
+    // transform wanting to stat its own source had to rebuild the path from
+    // the configured directory and assume the process was running in the
+    // project root. Migrating svgl, whose transform reads file timestamps,
+    // that assumption was the whole difficulty.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection } from ${JSON.stringify(SRC)}
+import { readFileSync } from 'node:fs'
+import { z } from 'zod'
+const posts = defineCollection({
+  name: 'posts', directory: 'content/deep', include: '**/*.md',
+  schema: z.object({ title: z.string() }),
+  transform: (doc, ctx) => ({
+    title: doc.title,
+    // Read back through the path the context handed over: if it is wrong,
+    // or relative to the wrong place, this throws.
+    echoed: readFileSync(ctx.sourcePath, 'utf8').includes('body-marker') ? 'read-it' : 'wrong-file'
+  })
+})
+export default defineConfig({ collections: { posts } })
+`
+    )
+    await fixture.write('content/deep/a.md', '---\ntitle: A\n---\nbody-marker')
+
+    await createBuilder({ root: fixture.dir }).build()
+
+    const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
+    expect(doc).toContain('read-it')
+  })
+
+  fixtureTest('leaves sourcePath undefined for a document with no file', async ({ fixture }) => {
+    // A loader's records were handed the identifier the loader invented, which
+    // is not something `stat` can open. Nothing is the honest answer.
+    await fixture.write(
+      'contentmap.config.ts',
+      `import { defineConfig, defineCollection, defineLoader } from ${JSON.stringify(SRC)}
+import { z } from 'zod'
+const probe = defineCollection({
+  name: 'probe',
+  loader: defineLoader({
+    name: 'probe',
+    load: () => ({ records: [{ id: 'x', data: { title: 'X' }, digest: 'd' }], fromCache: false })
+  }),
+  schema: z.object({ title: z.string() }),
+  transform: (doc, ctx) => ({ title: doc.title, had: String(ctx.sourcePath) })
+})
+export default defineConfig({ collections: { probe } })
+`
+    )
+
+    await createBuilder({ root: fixture.dir }).build()
+
+    const doc = await readFile(join(fixture.dir, '.contentmap/probe/x.js'), 'utf8')
+    expect(doc).toContain('"undefined"')
+  })
+
   fixtureTest('emits documents in a stable order', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))
     for (const n of ['c', 'a', 'b']) {

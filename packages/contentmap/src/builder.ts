@@ -678,7 +678,7 @@ export class Builder {
     collection: ResolvedCollection,
     validated: Record<string, unknown>,
     documentMeta: DocumentMeta,
-    file: { relativePath: string; absolutePath: string; content: string },
+    file: { relativePath: string; absolutePath: string; content: string; virtual?: boolean },
     body: string,
     diagnostics: DiagnosticBag,
     stack: readonly string[]
@@ -704,6 +704,10 @@ export class Builder {
       // declare `content` has it stripped, which would leave ctx.body empty.
       body,
       path: file.absolutePath,
+      // A loader's document has no file, and its `absolutePath` is the
+      // identifier the loader gave it. Handing that to a transform expecting
+      // something `stat`-able would be worse than handing it nothing.
+      ...(file.virtual ? {} : { sourcePath: file.absolutePath }),
       renderer: this.#config?.renderer,
       logger: this.#logger,
       ...assets,
@@ -1006,7 +1010,7 @@ export class Builder {
         collection,
         data,
         meta,
-        { relativePath: source, absolutePath: source, content: '' },
+        { relativePath: source, absolutePath: source, content: '', virtual: true },
         record.body ?? '',
         diagnostics,
         stack

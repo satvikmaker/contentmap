@@ -138,7 +138,9 @@ npx contentmap build
 
 ### Transform context
 
-Inside `transform`, `ctx` gives you: `meta`, `body`, `markdown()`, `mdx()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`, `image()`, `asset()`, `emitFile()`, `documents()`, `siblings()`, `reference()`, `addWatchFile()`, `cache()` and `skip()`.
+Inside `transform`, `ctx` gives you: `meta`, `sourcePath`, `body`, `markdown()`, `mdx()`, `plain()`, `excerpt()`, `toc()`, `readingTime()`, `image()`, `asset()`, `emitFile()`, `documents()`, `siblings()`, `reference()`, `addWatchFile()`, `cache()` and `skip()`.
+
+`meta.filePath` is relative to the collection's directory; `sourcePath` is the absolute path of the file on disk, for a transform that wants to `stat` its own source, read a sibling, or ask git about it. It is `undefined` for documents a loader produced, which never had a file.
 
 ### After the build
 

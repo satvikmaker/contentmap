@@ -82,6 +82,13 @@ export interface ContextInput {
   renderer: Renderer | undefined
   logger: Logger
   services?: ContextServices
+  /**
+   * Absolute path on disk, when the document came from a file.
+   *
+   * Separate from `path`, which is always set because renderers and the MDX
+   * compiler need a base URL even for a document a loader invented.
+   */
+  sourcePath?: string
   /** Copies a relative reference. Undefined disables asset handling entirely. */
   resolveAsset?: AssetResolver
   resolveImage?: ImageResolver
@@ -170,6 +177,7 @@ export function createTransformContext(input: ContextInput): TransformContext {
 
   return {
     meta,
+    sourcePath: input.sourcePath,
     body,
     logger,
     markdown,

@@ -195,6 +195,21 @@ export interface SkipSignal {
  */
 export interface TransformContext {
   meta: DocumentMeta
+  /**
+   * Absolute path of the file this document was read from.
+   *
+   * `meta.filePath` is relative to the collection's directory, so a transform
+   * that wants to `stat` its own source, read a sibling, or ask git about it
+   * had to rebuild the path from the configured directory and hope the process
+   * was running in the project root. It is deliberately not on `meta`: that is
+   * serialized into every emitted document, and an absolute path would put
+   * this machine's directory layout into generated output and make two
+   * checkouts disagree.
+   *
+   * `undefined` for a document that never came from a file — anything a
+   * `defineLoader` source or `http()` produced.
+   */
+  sourcePath: string | undefined
   /** Raw body, frontmatter stripped. */
   body: string
   /** Rendered HTML, via the configured renderer. Memoised per document. */
