@@ -44,6 +44,20 @@ describe('build pipeline', () => {
     expect(index).not.toContain('Body A')
   })
 
+  fixtureTest('marks the generated directory as ESM', async ({ fixture }) => {
+    // Every generated module is ESM. Without this, Node parses one as
+    // CommonJS, fails, reparses it and warns — which anything importing the
+    // output from a project that is not itself `"type": "module"` sees on
+    // every build. A migrated blog's feed script printed it twice.
+    await fixture.write('contentmap.config.ts', config(POSTS))
+    await fixture.write('content/a.md', '---\ntitle: A\ndate: 2026-01-01\n---\nBody A')
+
+    await createBuilder({ root: fixture.dir }).build()
+
+    const manifest = await readFile(join(fixture.dir, '.contentmap/package.json'), 'utf8')
+    expect(JSON.parse(manifest)).toEqual({ type: 'module' })
+  })
+
   fixtureTest('emits documents in a stable order', async ({ fixture }) => {
     await fixture.write('contentmap.config.ts', config(POSTS))
     for (const n of ['c', 'a', 'b']) {

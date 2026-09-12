@@ -313,6 +313,11 @@ export async function emitBarrel(config: ResolvedConfig, stats: EmitStats): Prom
     lines.push(`export { ${name} } from './${name}/index.js'\n`)
   }
   await emit(join(config.output.dir, 'index.js'), lines.join(''), stats)
+  // Every generated module is ESM. Without this, Node parses one as CommonJS,
+  // fails, reparses it and warns MODULE_TYPELESS_PACKAGE_JSON — which anything
+  // importing the output from a project that is not itself `"type": "module"`
+  // sees, a post-build script generating a feed being the usual one.
+  await emit(join(config.output.dir, 'package.json'), '{ "type": "module" }\n', stats)
 }
 
 /**
