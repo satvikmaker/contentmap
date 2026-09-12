@@ -199,6 +199,43 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
 
   const configProps: ConfigProp[] = []
 
+  // velite's output block maps onto contentmap's field for field, the
+  // `[hash:6]` token included, so it is converted rather than reported. It was
+  // not read at all before: `data` moves where documents are written and
+  // `assets`/`base`/`name` decide where copied files land and what URL they
+  // get, and dropping them silently changed the build without saying so.
+  const output = configObject && prop(configObject, 'output')
+  const outputObject = resolveObject(file, output)
+  if (outputObject) {
+    const mapped: string[] = []
+    for (const [from, to] of [
+      ['data', 'dir'],
+      ['assets', 'assets'],
+      ['base', 'assetsBase'],
+      ['name', 'assetsName'],
+      ['clean', 'clean']
+    ] as const) {
+      const value = prop(outputObject, from)
+      if (!value) continue
+      // Re-quote strings rather than copying the source text, so the emitted
+      // config does not mix quote styles with the lines around it.
+      const string = stringOf(value)
+      mapped.push(
+        `${to}: ${string === undefined ? text(value) : `'${string.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`}`
+      )
+    }
+    if (mapped.length) configProps.push(`output: { ${mapped.join(', ')} }`)
+  } else if (output) {
+    notes.push({
+      kind: 'manual',
+      subject: 'output',
+      message: `\`${short(output)}\` could not be followed, so the output settings were not carried over`,
+      hint:
+        'velite `data` is contentmap `output.dir`, `base` is `assetsBase`, `name` is ' +
+        '`assetsName`; `assets` and `clean` keep their names.'
+    })
+  }
+
   // complete runs once the build is done, handed every collection's documents
   // — exactly afterBuild's moment — so it is kept as written and given them.
   const complete = configObject && prop(configObject, 'complete')

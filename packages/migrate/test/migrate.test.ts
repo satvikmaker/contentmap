@@ -167,6 +167,27 @@ describe('velite', () => {
     expect(result.config).toContain("typeName: 'Post'")
   })
 
+  it('carries the output block over, which maps field for field', () => {
+    // Never read at all before: a velite config's `output` was dropped with
+    // no note, which is the one way "nothing is dropped silently" breaks.
+    // Every key has an exact equivalent, down to the `[hash:6]` token.
+    const out = migrate(
+      VELITE.replace(
+        "export default defineConfig({ root: 'content', collections: { posts } })",
+        `export default defineConfig({ root: 'content', collections: { posts }, output: {
+           data: '.velite', assets: 'public/static', base: '/static/',
+           name: '[name]-[hash:6].[ext]', clean: true
+         } })`
+      ),
+      'velite'
+    )
+    expect(out.config).toContain("dir: '.velite'")
+    expect(out.config).toContain("assets: 'public/static'")
+    expect(out.config).toContain("assetsBase: '/static/'")
+    expect(out.config).toContain("assetsName: '[name]-[hash:6].[ext]'")
+    expect(out.config).toContain('clean: true')
+  })
+
   it('passes plain zod through, chained methods and all', () => {
     expect(result.config).toContain('title: z.string().max(99),')
   })
