@@ -271,8 +271,12 @@ export function migrateContentlayer(file: ts.SourceFile): EmitPlan {
     const shape: Shape = { typeName, contentType, bodyField, typeField, locals }
     // contentlayer put the type name on every document, and code reads it —
     // a migrated starter's search index was identical but for this field.
-    // Not when the schema claims the name for itself.
-    const carriesType = !plan.fields.some(field => field.name === typeField)
+    // Not when the config claims the name for itself, in either half: a
+    // computed field called `type` used to be emitted alongside this one and
+    // the transform returned an object literal with the key twice.
+    const carriesType =
+      !plan.fields.some(field => field.name === typeField) &&
+      !computed.some(entry => entry.name === typeField)
     const transform = buildTransform(file, computed, { ...shape, carriesType }, sink)
     if (transform) plan.transform = transform
     if (carriesType) {
@@ -665,7 +669,9 @@ function buildTransform(
     const lines = [
       `${head} ({`,
       `    ...${doc},`,
-      ...(shape.carriesType ? [`    ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`] : []),
+      ...(shape.carriesType
+        ? [`    ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`]
+        : []),
       ...props.map(p => `    ${reindent(p, '    ')},`)
     ]
     return [...withoutTrailingComma(lines), '  })'].join('\n')
@@ -679,7 +685,8 @@ function buildTransform(
   }
   if (legacy) lines.push(...legacyShape(shape))
   lines.push('    return {', `      ...${doc},`)
-  if (shape.carriesType) lines.push(`      ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`)
+  if (shape.carriesType)
+    lines.push(`      ${propertyKey(shape.typeField)}: ${literal(shape.typeName)},`)
   if (hasBody) {
     lines.push(
       `      ${shape.bodyField === body ? body : `${propertyKey(shape.bodyField)}: ${body}`},`

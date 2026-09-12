@@ -58,8 +58,9 @@ const HELPERS: Record<string, Helper> = {
     kind: 'manual',
     message: 'MDX compiles through @contentmap/mdx',
     hint:
-      'Install @contentmap/mdx, set `mdx: mdx()` on the config, and add ' +
-      '`code: await ctx.mdx()` to transform. velite produced the same function-body string.',
+      'Install @contentmap/mdx, set `mdx: mdx({ minify: true })` on the config, and add ' +
+      '`code: await ctx.mdx()` to transform. velite produced the same function-body string, ' +
+      'minified — `minify: true` matches it and needs esbuild, which is an optional peer.',
     install: '@contentmap/mdx'
   },
   image: {
@@ -222,14 +223,15 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
   const output = configObject && prop(configObject, 'output')
   const outputObject = resolveObject(file, output)
   if (outputObject) {
+    const EQUIVALENT = {
+      data: 'dir',
+      assets: 'assets',
+      base: 'assetsBase',
+      name: 'assetsName',
+      clean: 'clean'
+    } as const
     const mapped: string[] = []
-    for (const [from, to] of [
-      ['data', 'dir'],
-      ['assets', 'assets'],
-      ['base', 'assetsBase'],
-      ['name', 'assetsName'],
-      ['clean', 'clean']
-    ] as const) {
+    for (const [from, to] of Object.entries(EQUIVALENT)) {
       const value = prop(outputObject, from)
       if (!value) continue
       // Re-quote strings rather than copying the source text, so the emitted
@@ -240,6 +242,18 @@ export function migrateVelite(file: ts.SourceFile): EmitPlan {
       )
     }
     if (mapped.length) configProps.push(`output: { ${mapped.join(', ')} }`)
+    // A key with no equivalent would otherwise go the way the whole block used
+    // to: not read, not reported, and quietly not doing what it says.
+    for (const member of outputObject.properties) {
+      const named = member.name && ts.isIdentifier(member.name) ? member.name.text : undefined
+      if (named !== undefined && named in EQUIVALENT) continue
+      notes.push({
+        kind: 'unsupported',
+        subject: 'output',
+        message: `\`${named ?? short(member)}\` has no equivalent on contentmap's output`,
+        hint: 'Not carried over. contentmap maps data, assets, base, name and clean.'
+      })
+    }
   } else if (output) {
     notes.push({
       kind: 'manual',

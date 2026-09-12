@@ -105,12 +105,11 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
       // Whatever the transform calls its context, `_meta` has to move onto
       // that name — spelling it `ctx` regardless emitted a reference to a
       // parameter the function never declared.
-      const context = contextName(transform)
-      const rewritten = withContext(
-        transform,
-        original.replace(/\b(\w+)\._meta\b/g, `${context}.meta`),
-        context
-      )
+      const uses = /\b\w+\._meta\b/.test(original)
+      const context = contextFor(transform)
+      const rewritten = uses
+        ? context.declare(original).replace(/\b(\w+)\._meta\b/g, context.expression)
+        : original
       plan.transform = rewritten
       if (rewritten !== original) {
         notes.push({
@@ -119,6 +118,21 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
           subject: 'transform',
           message: '`_meta` was moved from the document onto the context',
           hint: 'The field names are identical; only the owner changed.'
+        })
+      }
+      // A transform written elsewhere and named here is carried over as it
+      // was, and nothing rewrites the inside of it. Left unsaid, `_meta` reads
+      // as undefined on the first build, from code that looks untouched
+      // because it is.
+      if (!uses && context.opaque && readsMeta(file, transform)) {
+        notes.push({
+          kind: 'manual',
+          collection: key,
+          subject: 'transform',
+          message: `\`${short(transform)}\` reads \`_meta\`, and it is declared outside the config`,
+          hint:
+            'It was carried over unchanged. contentmap puts those fields on the transform context, ' +
+            'so `doc._meta.path` becomes `ctx.meta.path` where that function is written.'
         })
       }
       notes.push({
@@ -191,40 +205,105 @@ export function migrateContentCollections(file: ts.SourceFile): EmitPlan {
 }
 
 /**
- * What this transform calls its context, or `ctx` if it does not take one.
+ * How `<doc>._meta` should be spelled in this transform, and what its parameter
+ * list needs so that spelling resolves.
  *
- * Real configs spell it `context` as often as `ctx`, and the rewrite that moves
- * `_meta` has to use the name that is actually in scope.
+ * Three shapes, because real configs use all three. A transform that names its
+ * context — `(doc, context) => …` — has to keep that name: writing `ctx`
+ * regardless produced a config referencing a parameter that was never
+ * declared. One that takes no context needs one added. One that destructures
+ * it — `(doc, { documents }) => …` — has no name to use at all, so `meta` is
+ * pulled out of the pattern alongside whatever was already there.
+ *
+ * `declare` is applied to the ORIGINAL source, before `_meta` is replaced, so
+ * the offsets it splices at are the ones the AST reported.
  */
-function contextName(node: ts.Expression): string {
-  if (!ts.isArrowFunction(node)) return 'ctx'
-  const second = node.parameters[1]
-  if (second && ts.isIdentifier(second.name)) return second.name.text
-  return 'ctx'
+/**
+ * Does the function this expression names read `_meta` where it is declared?
+ *
+ * Only asked about a transform whose parameter list cannot be read from the
+ * config — `transform: build`. Both spellings of a top-level function count,
+ * because either one is carried over verbatim.
+ */
+function readsMeta(file: ts.SourceFile, node: ts.Expression): boolean {
+  if (!ts.isIdentifier(node)) return false
+  const name = node.text
+  for (const statement of file.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) {
+      return /\b\w+\._meta\b/.test(text(statement))
+    }
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
+        return /\b\w+\._meta\b/.test(text(declaration))
+      }
+    }
+  }
+  return false
 }
 
-/**
- * Give the transform a context parameter if the rewrite started using one.
- *
- * content-collections transforms are commonly written `(doc) => …` because the
- * context is rarely needed. Moving `_meta` onto the context makes it needed, and
- * a rewrite that references a parameter the function does not declare produces
- * "ctx is not defined" on the first build — which a text-comparison test cannot
- * see, and a real build finds immediately.
- */
-function withContext(node: ts.Expression, rewritten: string, context: string): string {
-  if (!rewritten.includes(`${context}.`)) return rewritten
-  if (!ts.isArrowFunction(node)) return rewritten
-  if (node.parameters.length >= 2) return rewritten
+interface ContextUse {
+  /** What `<doc>._meta` becomes. */
+  expression: string
+  /** Adjust the parameter list so that expression resolves. */
+  declare(source: string): string
+  /** True when the parameter list cannot be read — a function named elsewhere. */
+  opaque?: boolean
+}
 
+function contextFor(node: ts.Expression): ContextUse {
+  const plain = (expression: string): ContextUse => ({ expression, declare: source => source })
+  if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
+    return { ...plain('ctx.meta'), opaque: true }
+  }
+
+  const second = node.parameters[1]
+  if (second && ts.isIdentifier(second.name)) return plain(`${second.name.text}.meta`)
+
+  if (second && ts.isObjectBindingPattern(second.name)) {
+    const pattern = second.name
+    // Already destructured, under its own name or a renamed one.
+    const bound = pattern.elements.find(
+      element => (element.propertyName ?? element.name).getText() === 'meta'
+    )
+    if (bound && ts.isIdentifier(bound.name)) return plain(bound.name.text)
+    if (bound) return { ...plain('ctx.meta'), opaque: true }
+
+    const last = pattern.elements[pattern.elements.length - 1]
+    // Before the closing brace when the pattern is empty, after the last
+    // binding otherwise — both measured from the start of the function so the
+    // offset lands in the same place in the text being spliced.
+    const at = (last ? last.getEnd() : pattern.getStart() + 1) - node.getStart()
+    return {
+      expression: 'meta',
+      // A populated pattern already has its closing space; an empty one has
+      // nothing between the braces and needs both.
+      declare: source => `${source.slice(0, at)}${last ? ', meta' : ' meta '}${source.slice(at)}`
+    }
+  }
+
+  if (second) return { ...plain('ctx.meta'), opaque: true }
+
+  // No context at all, which is how most of these are written: the context is
+  // rarely needed until `_meta` moves onto it.
   const first = node.parameters[0]
   const name = first && ts.isIdentifier(first.name) ? first.name.text : 'doc'
-  // Everything before the arrow is `async?` plus the parameter list, so
-  // replacing that span rewrites both forms — `doc =>` and `(doc) =>` — without
-  // having to work out whether parentheses were there.
-  const head = rewritten.slice(0, node.equalsGreaterThanToken.getStart() - node.getStart())
-  const isAsync = /\basync\b/.test(head)
-  return `${isAsync ? 'async ' : ''}(${name}, ${context}) ${rewritten.slice(head.length)}`
+  return {
+    expression: 'ctx.meta',
+    declare: source => {
+      if (ts.isFunctionExpression(node)) {
+        const open = node.parameters.pos - node.getStart()
+        const close = (first ? first.getEnd() : node.parameters.end) - node.getStart()
+        return `${source.slice(0, open)}${first ? `${name}, ` : ''}ctx${source.slice(close)}`
+      }
+      // Everything before the arrow is `async?` plus the parameter list, so
+      // replacing that span rewrites both forms — `doc =>` and `(doc) =>` —
+      // without having to work out whether parentheses were there.
+      const head = source.slice(0, node.equalsGreaterThanToken.getStart() - node.getStart())
+      const isAsync = /\basync\b/.test(head)
+      return `${isAsync ? 'async ' : ''}(${name}, ctx) ${source.slice(head.length)}`
+    }
+  }
 }
 
 /** `defineSingleton(...)` means one document, which contentmap spells `single`. */

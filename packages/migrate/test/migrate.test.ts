@@ -178,6 +178,21 @@ describe('velite', () => {
     expect(note?.hint).toContain('fail')
   })
 
+  it('reports an output key it has no equivalent for', () => {
+    // The whole block used to vanish silently; a single key with no
+    // equivalent would have vanished the same way.
+    const out = migrate(
+      VELITE.replace(
+        "export default defineConfig({ root: 'content', collections: { posts } })",
+        "export default defineConfig({ root: 'content', collections: { posts }, output: { data: '.velite', somethingElse: true } })"
+      ),
+      'velite'
+    )
+    expect(out.config).toContain("dir: '.velite'")
+    const note = out.notes.find(n => n.subject === 'output' && n.kind === 'unsupported')
+    expect(note?.message).toContain('somethingElse')
+  })
+
   it('carries the output block over, which maps field for field', () => {
     // Never read at all before: a velite config's `output` was dropped with
     // no note, which is the one way "nothing is dropped silently" breaks.
@@ -275,6 +290,70 @@ describe('content-collections', () => {
 
   it('leaves a transform alone when it already takes a context', () => {
     expect(result.config).toContain('async (doc, ctx) =>')
+  })
+
+  it('moves _meta onto the context in every shape a transform is written in', () => {
+    // The first fix here only handled an arrow function with a named second
+    // parameter, which left the other shapes emitting `ctx` with no `ctx` in
+    // scope — the same broken config, from the same cause, one step along.
+    const shapes: [string, string, string][] = [
+      // label, transform source, what the body must end up saying
+      [
+        'function expression',
+        'async function (doc, context) { return { s: doc._meta.path } }',
+        'context.meta.path'
+      ],
+      [
+        'destructured context',
+        'async (doc, { documents }) => ({ s: doc._meta.path })',
+        'meta.path'
+      ],
+      [
+        'context already destructured',
+        'async (doc, { meta }) => ({ s: doc._meta.path })',
+        'meta.path'
+      ],
+      ['renamed in the pattern', 'async (doc, { meta: m }) => ({ s: doc._meta.path })', 'm.path']
+    ]
+    for (const [label, source, expected] of shapes) {
+      const out = migrate(
+        CONTENT_COLLECTIONS.replace(
+          'transform: async (doc, ctx) => ({ ...doc, slug: doc._meta.path })',
+          `transform: ${source}`
+        ),
+        'content-collections'
+      )
+      expect(out.config, label).toContain(expected)
+      expect(out.config, label).not.toContain('ctx.meta')
+    }
+  })
+
+  it('adds meta to a destructured context rather than a parameter beside it', () => {
+    const out = migrate(
+      CONTENT_COLLECTIONS.replace(
+        'transform: async (doc, ctx) => ({ ...doc, slug: doc._meta.path })',
+        'transform: async (doc, { documents }) => ({ ...doc, slug: doc._meta.path })'
+      ),
+      'content-collections'
+    )
+    expect(out.config).toContain('{ documents, meta }')
+  })
+
+  it('says so when a transform declared elsewhere reads _meta', () => {
+    // `transform: build` is carried over verbatim and nothing rewrites the
+    // inside of it, so `_meta` reads as undefined on the first build from code
+    // that looks untouched because it is.
+    const out = migrate(
+      `import { defineCollection, defineConfig } from '@content-collections/core'
+       const build = (doc, context) => ({ ...doc, slug: doc._meta.path })
+       const posts = defineCollection({ name: 'posts', directory: 'c', include: '*.md',
+         schema: z.object({}), transform: build })
+       export default defineConfig({ collections: [posts] })`,
+      'content-collections'
+    )
+    const said = out.notes.find(n => n.kind === 'manual' && n.message.includes('_meta'))
+    expect(said?.message).toContain('build')
+    expect(said?.hint).toContain('ctx.meta.path')
   })
 
   it('moves _meta onto the context by the name that context already has', () => {
@@ -381,6 +460,23 @@ describe('output that has to compile', () => {
     expect(result.config.match(/content:/g)).toHaveLength(1)
     expect(result.config).toContain('content: z.number().optional()')
     expect(result.config).toContain('const body = { raw: ctx.body')
+  })
+
+  it('leaves a computed field named type to its author too', () => {
+    // The guard only looked at schema fields, so a computed field called
+    // `type` got contentlayer's type name emitted beside it and the transform
+    // returned an object literal with the same key twice.
+    const result = migrate(
+      `import { defineDocumentType, makeSource } from 'contentlayer2/source-files'
+       const A = defineDocumentType(() => ({ name: 'Post', filePathPattern: '*.md',
+         fields: { title: { type: 'string' } },
+         computedFields: { type: { type: 'string', resolve: doc => 'custom-' + doc.title } } }))
+       export default makeSource({ contentDirPath: 'c', documentTypes: [A] })`,
+      'contentlayer2'
+    )
+    expect(result.config).toContain("type: 'custom-' + doc.title")
+    expect(result.config).not.toContain("type: 'Post'")
+    expect(result.config.match(/^\s*type:/gm)).toHaveLength(1)
   })
 
   it('leaves a field named type to its author', () => {
