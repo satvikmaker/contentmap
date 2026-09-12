@@ -41,6 +41,28 @@ const until = async (fn: () => Promise<void> | void, context?: () => string): Pr
   }
 }
 
+/**
+ * A write that runs at most once every `ms`, for a retry loop that has to keep
+ * re-writing.
+ *
+ * These loops rewrite because a watcher is not reliably live the instant it
+ * says it is, so the first write after registering can be lost. Doing it on
+ * every 25ms poll fixes that and buys a worse problem: the writes outpace the
+ * debounced rebuild, which restarts on each one and never reaches the point of
+ * writing output. That is a livelock, and on a slow Windows runner it looked
+ * exactly like a watcher that had seen nothing — the recorded activity showed
+ * change, build, change, build for the full thirty seconds with the output
+ * never once updating.
+ */
+function periodically(ms: number): (write: () => Promise<unknown>) => Promise<void> {
+  let last = 0
+  return async write => {
+    if (Date.now() - last < ms) return
+    last = Date.now()
+    await write()
+  }
+}
+
 /** Records what the builder saw, so a timeout can say which half broke. */
 function record(builder: ReturnType<typeof createBuilder>): () => string {
   const seen: string[] = []
@@ -149,14 +171,15 @@ export default defineConfig({ collections: { posts } })
     const activity = record(builder)
     await builder.watch({ debounce: 20 })
     try {
-      // Rewritten on each attempt. `watch()` waits for chokidar to be ready,
+      // Rewritten periodically. `watch()` waits for chokidar to be ready,
       // but a single `add` event created immediately afterwards can still be
       // dropped — fsevents on macOS is where this showed up. The guarantee is
       // that a file added while watching gets picked up, not that the first
       // event after ready is never lost. A file that never appears at all
       // still fails here.
+      const readd = periodically(2_000)
       await until(async () => {
-        await writeFile(join(fixture.dir, 'content/b.md'), '---\ntitle: B\n---\nx')
+        await readd(() => writeFile(join(fixture.dir, 'content/b.md'), '---\ntitle: B\n---\nx'))
         const index = await readFile(join(fixture.dir, '.contentmap/posts/index.js'), 'utf8')
         expect(index).toContain('"b"')
       }, activity)
@@ -430,15 +453,18 @@ export default defineConfig({ collections: { posts, notes } })
 
       // The new directory must now be live.
       //
-      // Rewritten on each attempt rather than once up front. `watcher.add()`
+      // Rewritten periodically rather than once up front. `watcher.add()`
       // returns before the OS watch is established — noticeably so on Windows,
       // where a file created inside that gap is never reported. The guarantee
       // is that edits to the new directory get picked up, not that the first
       // write after a reload wins the race. A directory that never became
       // watched still fails here, which is the regression worth catching.
       let n = 0
+      const rewrite = periodically(2_000)
       await until(async () => {
-        await writeFile(join(fixture.dir, 'notes/n2.md'), `---\ntitle: Note ${n++}\n---\nx`)
+        await rewrite(() =>
+          writeFile(join(fixture.dir, 'notes/n2.md'), `---\ntitle: Note ${n++}\n---\nx`)
+        )
         const index = await readFile(join(fixture.dir, '.contentmap/notes/index.js'), 'utf8')
         expect(index).toContain('"n2"')
       }, activity)
@@ -481,15 +507,16 @@ export default defineConfig({ collections: { posts } })
       const handle = await builder.watch({ debounce: 20 })
       expect(handle.paths.some(p => p.endsWith('extra.txt'))).toBe(true)
 
-      // Rewritten on each attempt, like the other watch assertions.
+      // Rewritten periodically, like the other watch assertions.
       // `watcher.add()` returns before the OS watch is live, so a single write
       // immediately afterwards can go unseen — the recorder showed the initial
       // build and then nothing at all for thirty seconds on macOS. The
       // guarantee is that a change to a watched file rebuilds, not that the
       // first write after registering it wins the race. A file that was never
       // watched still fails here.
+      const touch = periodically(2_000)
       await until(async () => {
-        await writeFile(join(fixture.dir, 'data/extra.txt'), 'two')
+        await touch(() => writeFile(join(fixture.dir, 'data/extra.txt'), 'two'))
         const doc = await readFile(join(fixture.dir, '.contentmap/posts/a.js'), 'utf8')
         expect(doc).toContain('"two"')
       }, activity)
