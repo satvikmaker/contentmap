@@ -1,5 +1,37 @@
 # contentmap
 
+## 1.1.0
+
+### Minor Changes
+
+- 07dce53: `afterBuild` runs after every build that succeeds — the first, and each rebuild in watch mode — with every collection's documents in hand. It is the place for work that needs the whole corpus: a search index, a feed, tag counts.
+
+  ```ts
+  export default defineConfig({
+    collections: { posts },
+    afterBuild: async ctx => {
+      const index = ctx.documents(posts).map(({ title, _meta }) => ({ title, path: _meta.path }))
+      await ctx.writeFile('public/search.json', JSON.stringify(index))
+    }
+  })
+  ```
+
+  It runs inside the build, so `contentmap build`, `contentmap dev` and every framework integration run it the same way. `ctx.documents(posts)` keeps the collection's type. `ctx.writeFile` skips unchanged bytes, writes atomically, refuses a path outside the project, and is never mistaken by the watcher for a change. A hook that throws fails the build like any other error; hooks are skipped after a failed build and by `contentmap check`.
+
+  `BuildFailedError` and `formatDiagnostics` are exported for integrations that need to fail a build, or report one, the way the CLI does.
+
+- 3e5a180: `ctx.sourcePath` — the absolute path of the file a document was read from.
+
+  `meta.filePath` is relative to the collection's directory, so a transform wanting to `stat` its own source, read a sibling file, or ask git about it had to rebuild the path from the configured directory and assume the build was running in the project root. Migrating [svgl](https://github.com/pheralb/svgl), whose transform reads file timestamps for `createdAt` and `updatedAt`, that assumption was the only awkward part of the config.
+
+  Deliberately on the context rather than on `meta`: `meta` is serialized into every emitted document, and an absolute path there would write this machine's directory layout into generated output and make two checkouts disagree. It is `undefined` for a document that never came from a file — anything a `defineLoader` source or `http()` produced.
+
+### Patch Changes
+
+- 375b075: The generated directory now carries `{ "type": "module" }`. Every module in it is ESM, and without that marker Node parses one as CommonJS, fails, reparses it and warns `MODULE_TYPELESS_PACKAGE_JSON` — which anything importing the output from a project that is not itself `"type": "module"` sees on every build. Migrating a real blog surfaced it: its post-build feed script printed the warning twice per build.
+- 07dce53: `ctx.documents(posts)` finds a collection whose definition never set `name`. `name` has been optional since 0.2 — it defaults to the key in `collections` — but a definition passed back to `documents()`, `resolve()` or `resolveMany()` was looked up by its own `name`, and failed with "Unknown collection" for a collection that plainly existed.
+- abd668a: `ctx.addWatchFile('./relative/path')` resolves against the document's own directory. It resolved against the project root instead, so for any collection outside the root it watched a file that did not exist, and editing the real one never rebuilt the document.
+
 ## 1.0.1
 
 ### Patch Changes

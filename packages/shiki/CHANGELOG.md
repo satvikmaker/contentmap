@@ -1,5 +1,16 @@
 # @contentmap/shiki
 
+## 1.1.0
+
+### Patch Changes
+
+- Updated dependencies [07dce53]
+- Updated dependencies [375b075]
+- Updated dependencies [3e5a180]
+- Updated dependencies [07dce53]
+- Updated dependencies [abd668a]
+  - contentmap@1.1.0
+
 ## 1.0.1
 
 ### Patch Changes
