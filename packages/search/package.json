@@ -1,0 +1,59 @@
+{
+  "name": "@contentmap/search",
+  "version": "1.1.0",
+  "description": "Search index hooks for contentmap — Pagefind, Orama and MiniSearch, without shipping the corpus.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satvikmaker/contentmap.git",
+    "directory": "packages/search"
+  },
+  "bugs": "https://github.com/satvikmaker/contentmap/issues",
+  "homepage": "https://github.com/satvikmaker/contentmap#readme",
+  "engines": {
+    "node": "^22.11.0 || >=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "peerDependencies": {
+    "@orama/orama": "^3.0.0",
+    "@orama/plugin-data-persistence": "^3.0.0",
+    "contentmap": "workspace:^",
+    "minisearch": "^7.0.0",
+    "pagefind": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "minisearch": {
+      "optional": true
+    },
+    "pagefind": {
+      "optional": true
+    },
+    "@orama/orama": {
+      "optional": true
+    },
+    "@orama/plugin-data-persistence": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@orama/orama": "^3.1.13",
+    "@orama/plugin-data-persistence": "^3.1.13",
+    "minisearch": "^7.2.0",
+    "pagefind": "^1.4.0"
+  }
+}

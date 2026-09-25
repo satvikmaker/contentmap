@@ -56,6 +56,7 @@ Dates are deliberately absent. Items move when they are ready, and the ordering 
 - [x] `ctx.cache()`, `ctx.emitFile()`, `ctx.addWatchFile()`, `ctx.skip()`
 - [x] Persistent transform cache keyed by content digest, relocatable with `--cache-dir`
 - [x] `afterBuild` — a hook with every document in hand, for search indexes, feeds and tag counts; run identically by the CLI and every integration, skipped after a failed build, and never mistaken by the watcher for a change
+- [x] `@contentmap/search` — Pagefind, Orama and MiniSearch indexes from your collections, with `fields` and `store` kept separate so a body can be searchable without being shipped
 
 ### Sources
 
@@ -107,7 +108,6 @@ The near-term list. These are the things most likely to change someone's mind ab
 
 ### Content
 
-- [ ] **Search index helpers** — first-party `afterBuild` hooks emitting an index for Pagefind, Orama or MiniSearch without shipping the corpus. Writing one by hand is already a few lines
 - [ ] **`@contentmap/git`** — last-modified dates, authors and history from git rather than from frontmatter people forget to update
 - [ ] **Draft and preview modes** — a first-class way to include drafts in dev and exclude them in production
 - [ ] **RSS, sitemap and feed helpers** — `afterBuild` hooks derived from collections you already declared

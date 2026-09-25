@@ -22,7 +22,8 @@ const DOCS = [
   'packages/webpack/README.md',
   'packages/mdx/README.md',
   'packages/shiki/README.md',
-  'packages/migrate/README.md'
+  'packages/migrate/README.md',
+  'packages/search/README.md'
 ]
 
 /** ```ts blocks that define a contentmap config. */
@@ -43,7 +44,7 @@ try {
   await mkdir(join(root, 'node_modules'), { recursive: true })
   await symlink(join(repo, 'packages/contentmap'), join(root, 'node_modules/contentmap'), 'dir')
   await symlink(join(repo, 'node_modules/zod'), join(root, 'node_modules/zod'), 'dir')
-  for (const pkg of ['markdown', 'unified', 'image', 'mdx', 'shiki']) {
+  for (const pkg of ['markdown', 'unified', 'image', 'mdx', 'shiki', 'search']) {
     await mkdir(join(root, 'node_modules/@contentmap'), { recursive: true }).catch(() => {})
     await symlink(
       join(repo, 'packages', pkg),

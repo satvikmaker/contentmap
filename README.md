@@ -120,21 +120,22 @@ npx contentmap build
 
 ## Features
 
-|                         |                                                                                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Any validator**       | zod, valibot, arktype, effect — all four tested for parity                                                                                        |
-| **Any source**          | Markdown, MDX, YAML, JSON, JSONC, TOML, raw text, HTTP APIs, or your own via `defineLoader` / `defineParser`                                      |
-| **Typed projections**   | `select()` narrows the row type; `where`, `sortBy` and `groupBy` still reach the whole index                                                      |
-| **MDX**                 | JSX in content, components imported in, values exported out — via [`@contentmap/mdx`](packages/mdx)                                               |
-| **Syntax highlighting** | VS Code grammars and themes at build time, light/dark aware — via [`@contentmap/shiki`](packages/shiki)                                           |
-| **Images**              | Dimensions read at build time so pages stop jumping, plus [thumbhash](https://evanw.github.io/thumbhash/) placeholders — 21 bytes, zero client JS |
-| **Assets**              | Content-hashed copying, URL rewriting in rendered HTML, orphan cleanup                                                                            |
-| **References**          | Cross-collection lookups with cycle detection, resolved on demand                                                                                 |
-| **Remote content**      | Digest-keyed revalidation, `--frozen` for offline CI, credentials screened out of the cache                                                       |
-| **Incremental**         | Transform cache keyed by content digest — never by mtime alone                                                                                    |
-| **Watch mode**          | Debounced, coalesced, one build at a time; a broken config keeps the last good output                                                             |
-| **After the build**     | A hook with every document in hand — search indexes, feeds, tag counts — run identically by the CLI and every integration                         |
-| **Diagnostics**         | Grouped by kind, with code frames, did-you-mean hints, and `--json` for CI                                                                        |
+|                         |                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Any validator**       | zod, valibot, arktype, effect — all four tested for parity                                                                                                   |
+| **Any source**          | Markdown, MDX, YAML, JSON, JSONC, TOML, raw text, HTTP APIs, or your own via `defineLoader` / `defineParser`                                                 |
+| **Typed projections**   | `select()` narrows the row type; `where`, `sortBy` and `groupBy` still reach the whole index                                                                 |
+| **MDX**                 | JSX in content, components imported in, values exported out — via [`@contentmap/mdx`](packages/mdx)                                                          |
+| **Syntax highlighting** | VS Code grammars and themes at build time, light/dark aware — via [`@contentmap/shiki`](packages/shiki)                                                      |
+| **Images**              | Dimensions read at build time so pages stop jumping, plus [thumbhash](https://evanw.github.io/thumbhash/) placeholders — 21 bytes, zero client JS            |
+| **Assets**              | Content-hashed copying, URL rewriting in rendered HTML, orphan cleanup                                                                                       |
+| **References**          | Cross-collection lookups with cycle detection, resolved on demand                                                                                            |
+| **Remote content**      | Digest-keyed revalidation, `--frozen` for offline CI, credentials screened out of the cache                                                                  |
+| **Incremental**         | Transform cache keyed by content digest — never by mtime alone                                                                                               |
+| **Watch mode**          | Debounced, coalesced, one build at a time; a broken config keeps the last good output                                                                        |
+| **After the build**     | A hook with every document in hand — search indexes, feeds, tag counts — run identically by the CLI and every integration                                    |
+| **Search**              | Pagefind, Orama or MiniSearch built from your collections — via [`@contentmap/search`](packages/search), which keeps the body searchable without shipping it |
+| **Diagnostics**         | Grouped by kind, with code frames, did-you-mean hints, and `--json` for CI                                                                                   |
 
 ### Transform context
 
@@ -264,7 +265,7 @@ Shipped, and what's next — the detail lives in [ROADMAP.md](ROADMAP.md).
 - [x] A codemod for all three incumbents, built for real against every config pattern it handles
 - [x] `afterBuild` — search indexes, feeds and tag counts, run identically everywhere
 - [ ] Real-world validation — [three applications migrated so far](ROADMAP.md#real-world-validation), one per incumbent, with their numbers published
-- [ ] Search index helpers for Pagefind, Orama and MiniSearch
+- [x] Search index helpers for Pagefind, Orama and MiniSearch — [`@contentmap/search`](packages/search)
 - [ ] `@contentmap/git` — dates and authors from history
 - [ ] Documentation site
 

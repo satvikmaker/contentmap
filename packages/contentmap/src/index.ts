@@ -1,7 +1,11 @@
 export { defineCollection, defineConfig, defineParser } from './config/define.ts'
 export { defineLoader, http, RemoteFetchError, RemoteStore } from './loaders/index.ts'
 export { findSecret, redactSecrets, screenForSecrets, SecretLeakError } from './security/secrets.ts'
-export { ConfigError, findConfig, resolveConfig } from './config/resolve.ts'
+// `collectionNameOf` is exported for packages that build on `afterBuild`:
+// the hook context takes a CollectionRef, so anything wrapping it needs to
+// resolve one to a name the same way the builder does — including a
+// definition that never set a `name` of its own.
+export { collectionNameOf, ConfigError, findConfig, resolveConfig } from './config/resolve.ts'
 export { Builder, createBuilder } from './builder.ts'
 export { BuildFailedError, formatDiagnostics } from './integration.ts'
 export { startWatch } from './watch/index.ts'
@@ -98,6 +102,10 @@ export type {
   BuilderOptions,
   BuildResult,
   CollectionDefinition,
+  // Named by AfterBuildContext.documents() and ctx.documents(), so a package
+  // built on either has to be able to spell them.
+  CollectionRef,
+  DocumentOf,
   Diagnostic,
   DiagnosticSeverity,
   DocumentMeta,
