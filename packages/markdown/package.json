@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/markdown",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Default markdown renderer for contentmap, built on marked.",
   "type": "module",
   "license": "MIT",

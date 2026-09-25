@@ -1,5 +1,12 @@
 # @contentmap/webpack
 
+## 1.2.0
+
+### Patch Changes
+
+- Updated dependencies [276cd18]
+  - contentmap@1.2.0
+
 ## 1.1.0
 
 ### Minor Changes

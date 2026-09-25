@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/migrate",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Migrate a contentlayer2, velite or content-collections config to contentmap.",
   "type": "module",
   "license": "MIT",

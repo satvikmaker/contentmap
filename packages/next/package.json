@@ -1,6 +1,6 @@
 {
   "name": "@contentmap/next",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Next.js integration for contentmap. Works on Turbopack and webpack.",
   "type": "module",
   "license": "MIT",
