@@ -156,6 +156,8 @@ export async function startWatch(
     if (event === 'addDir' || event === 'unlinkDir') return
     const absolute = resolve(path)
     if (isIgnored(absolute, config) || hooks.isOutput?.(absolute) === true) return
+    // A host watcher also reports files outside our content and dependencies.
+    if (![...current].some(watched => isWithin(watched, absolute))) return
 
     if (isConfigPath(absolute, config)) pendingConfig = absolute
     else pendingPaths.add(absolute)
